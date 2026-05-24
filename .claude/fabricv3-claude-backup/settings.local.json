@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(npx --yes create-next-app@14 . --typescript --tailwind --app --no-src-dir --import-alias \"@/*\" --eslint --use-npm)",
+      "Bash(mv /Users/jibinmichael/Desktop/fabricv3/.claude /tmp/fabricv3-claude-backup && ls -la /Users/jibinmichael/Desktop/fabricv3/)"
+    ]
+  }
+}

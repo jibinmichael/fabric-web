@@ -1,0 +1,371 @@
+.editorWrap {
+  position: relative;
+  background: #ffffff;
+  border-radius: 0;
+  padding: 56px 72px;
+  height: 100%;
+  min-height: 100%;
+  max-height: 100%;
+  overflow: visible;
+  font-family: "Sentinel", Georgia, "Times New Roman", serif;
+  font-weight: 400;
+}
+
+.editorWrap :global(.bn-container),
+.editorWrap :global(.bn-editor),
+.editorWrap :global(.bn-editor *) {
+  font-family: "Sentinel", Georgia, "Times New Roman", serif !important;
+}
+
+.editorWrap :global(.bn-editor) {
+  padding: 0;
+  background: transparent;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+}
+
+.editorWrap :global(.bn-container) {
+  border: none;
+  background: transparent;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+}
+
+.titleRow {
+  display: flex;
+  align-items: flex-end;
+  font-size: 22px;
+  font-weight: 700;
+  color: #1a1a1a;
+  line-height: 1.2;
+  margin-bottom: 32px;
+  font-family: "Sentinel", Georgia, "Times New Roman", serif;
+}
+
+.titleText {
+  white-space: pre-wrap;
+}
+
+.cursorWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-end;
+  margin-left: 2px;
+}
+
+.agentBadge {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  background: #22c55e;
+  color: #ffffff;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: "Sentinel", Georgia, "Times New Roman", serif;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.cursor {
+  width: 2px;
+  height: 22px;
+  background: #22c55e;
+  display: inline-block;
+  animation: planTitleCursorBlink 1s steps(1) infinite;
+}
+
+@keyframes planTitleCursorBlink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.userBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 24px;
+  font-family: "Sentinel", Georgia, "Times New Roman", serif;
+}
+
+.userAvatar {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: block;
+}
+
+.userAvatarFallback {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e5e5e5;
+  color: #1a1a1a;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.userName {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+  line-height: 1.2;
+}
+
+.dotSep {
+  font-size: 13px;
+  color: #999999;
+  line-height: 1.2;
+}
+
+.planningLabel {
+  font-size: 13px;
+  color: #999999;
+  line-height: 1.2;
+}
+
+.placeholderFlow {
+  font-family: "Sentinel", Georgia, "Times New Roman", serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: #c4c4c4;
+  pointer-events: none;
+  margin-bottom: 24px;
+}
+
+.planLines {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 24px;
+}
+
+.planLine {
+  font-family: "Sentinel", Georgia, "Times New Roman", serif;
+  font-size: 16px;
+  line-height: 1.7;
+  color: #1a1a1a;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.planLineRow {
+  display: flex;
+  align-items: flex-end;
+}
+
+.blocknoteHost {
+  position: relative;
+}
+
+.blocknoteHost :global(.bn-editor) {
+  caret-color: #22c55e;
+}
+
+.editorWrap :global(.bn-editor [data-content-type="heading"]) {
+  font-size: 20px !important;
+  font-weight: 600 !important;
+  color: #1a1a1a !important;
+  line-height: 1.4 !important;
+  margin: 0 !important;
+}
+
+.editorWrap :global(.bn-editor [data-content-type="paragraph"]) {
+  font-size: 16px !important;
+  color: #1a1a1a !important;
+  line-height: 1.8 !important;
+}
+
+.editorWrap :global(.bn-editor [data-content-type="bulletListItem"]) {
+  font-size: 16px !important;
+  color: #1a1a1a !important;
+  line-height: 1.7 !important;
+}
+
+.editorWrap :global(.bn-editor [data-content-type="checkListItem"]) {
+  font-size: 16px !important;
+  color: #1a1a1a !important;
+  line-height: 1.6 !important;
+}
+
+.editorWrap :global(.bn-block-content .bn-inline-content:empty::before) {
+  display: none !important;
+}
+
+.editorWrap :global(.ProseMirror p.is-editor-empty:first-child::before) {
+  content: attr(data-placeholder);
+  color: #c4c4c4;
+  pointer-events: none;
+  float: left;
+  height: 0;
+  font-size: 16px;
+}
+
+.editorWrap :global(.ProseMirror h2) {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1a1a1a;
+  line-height: 1.4;
+  margin: 0 0 12px 0;
+}
+
+.editorWrap :global(.ProseMirror p) {
+  font-size: 16px;
+  color: #1a1a1a;
+  line-height: 1.7;
+  margin: 0;
+}
+
+.editorWrap :global(.ProseMirror ul:not([data-type="taskList"])) {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.editorWrap :global(.ProseMirror ul:not([data-type="taskList"]) li) {
+  display: flex;
+  gap: 8px;
+  font-size: 16px;
+  color: #1a1a1a;
+  line-height: 1.7;
+  margin-bottom: 0;
+}
+
+.editorWrap :global(.ProseMirror ul:not([data-type="taskList"]) li::before) {
+  content: "•";
+  color: #dddddd;
+  flex-shrink: 0;
+  line-height: 1.7;
+}
+
+.editorWrap :global(.ProseMirror ul[data-type="taskList"]) {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.editorWrap :global(.ProseMirror ul[data-type="taskList"] li) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.editorWrap :global(.ProseMirror ul[data-type="taskList"] li > label) {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.editorWrap :global(.ProseMirror ul[data-type="taskList"] li input[type="checkbox"]) {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid #E4E4ED;
+  background: #ffffff;
+  margin: 0;
+  cursor: default;
+  position: relative;
+}
+
+.editorWrap :global(.ProseMirror ul[data-type="taskList"] li input[type="checkbox"]:checked) {
+  background: #E4E4ED;
+  border-color: #E4E4ED;
+}
+
+.editorWrap :global(.ProseMirror ul[data-type="taskList"] li > div) {
+  flex: 1;
+  font-size: 16px;
+  line-height: 1.7;
+  color: #1a1a1a;
+}
+
+.editorWrap :global(.ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div) {
+  color: #999999;
+  text-decoration: line-through;
+}
+
+.editorWrap :global(.ProseMirror hr) {
+  border: none;
+  height: 22px;
+  margin: 28px 0 24px 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 30' preserveAspectRatio='none'><path d='M 2 16 L 14 16 C 17 16 21 17 24 20 C 28 24 35 24 36 19 C 37 13 30 10 26 13 C 22 16 26 21 32 21 C 38 21 46 18 56 17 C 140 14 260 22 380 18 C 500 14 620 22 740 18 C 860 14 940 21 998 17' stroke='%23c4c4cc' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+.editorWrap :global([data-content-type="divider"]) {
+  position: relative;
+  height: 22px;
+  margin: 28px 0 24px 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 30' preserveAspectRatio='none'><path d='M 2 16 L 14 16 C 17 16 21 17 24 20 C 28 24 35 24 36 19 C 37 13 30 10 26 13 C 22 16 26 21 32 21 C 38 21 46 18 56 17 C 140 14 260 22 380 18 C 500 14 620 22 740 18 C 860 14 940 21 998 17' stroke='%23c4c4cc' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-position: center;
+}
+
+.editorWrap :global([data-content-type="divider"] > *),
+.editorWrap :global([data-content-type="divider"] hr) {
+  display: none !important;
+}
+
+.editorWrap :global(.bn-block-content p:empty) {
+  display: none !important;
+}
+
+.editorWrap :global(.bn-placeholder) {
+  display: none !important;
+}
+
+.editorWrap :global(.bn-editor .bn-block:only-child [data-content-type="paragraph"]) {
+  display: none !important;
+}
+
+.editorWrap :global(.ProseMirror > p:first-child:last-child:empty) {
+  display: none !important;
+}
+
+.editorWrap :global(.ProseMirror > p:first-child:last-child br) {
+  display: none !important;
+}
+
+.editorWrap :global(.collaboration-cursor__caret),
+.editorWrap :global(.collaboration-carets__caret) {
+  border-inline: 2px solid currentColor;
+}
+
+.editorWrap :global(.collaboration-cursor__label),
+.editorWrap :global(.collaboration-carets__label) {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+@keyframes shimmer {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+
+.editorWrap :global(.ProseMirror) {
+  transition: opacity 300ms ease;
+}
+
+.editorWrap.isUpdating :global(.ProseMirror) {
+  animation: shimmer 1.5s ease infinite;
+}
