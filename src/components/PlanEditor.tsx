@@ -2,11 +2,13 @@
 
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import TaskList from "@tiptap/extension-task-list";
@@ -18,7 +20,6 @@ import {
   FloatingToolbar,
   FloatingComposer,
   FloatingThreads,
-  AiToolbar,
   Toolbar,
 } from "@liveblocks/react-tiptap";
 import { useThreads } from "@liveblocks/react/suspense";
@@ -39,6 +40,7 @@ export type PlanData = {
 export type PlanEditorHandle = {
   clearBlockNote: () => void;
   typePlan: (plan: PlanData) => Promise<void>;
+  getPlanText: () => string;
 };
 
 type PlanEditorProps = {
@@ -99,8 +101,9 @@ function buildPlanHtml(plan: PlanData): string {
     parts.push(`<hr>`);
     parts.push(`<h2>API gaps</h2>`);
     for (const gap of plan.apiGaps) {
+      const cleanGap = gap.replace(/[⚠️△]/g, "").trim();
       parts.push(
-        `<p style="color: #dc2626; font-size: 14px; line-height: 1.7;">* ${escapeHtml(gap)}</p>`
+        `<p style="color: #dc2626; font-size: 14px; line-height: 1.7;">* ${escapeHtml(cleanGap)}</p>`
       );
     }
   }
@@ -121,8 +124,332 @@ function buildPlanHtml(plan: PlanData): string {
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+function GradientStar({ size = 14 }: { size?: number }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: "inline-block",
+        fontSize: size,
+        background:
+          "linear-gradient(135deg, #3b82f6 0%, #8b5cf6 50%, #ec4899 100%)",
+        WebkitBackgroundClip: "text",
+        backgroundClip: "text",
+        color: "transparent",
+        lineHeight: 1,
+        flexShrink: 0,
+      }}
+    >
+      ✦
+    </span>
+  );
+}
+
+type AskMessage = { role: "user" | "assistant"; content: string };
+
+function AskPanel({
+  planHandle,
+}: {
+  planHandle: React.RefObject<PlanEditorHandle | null>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState<AskMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [streaming, setStreaming] = useState("");
+  const [loading, setLoading] = useState(false);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    messagesScrollRef.current?.scrollTo({
+      top: messagesScrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages, streaming, open]);
+
+  const handleSend = async () => {
+    const q = input.trim();
+    if (!q || loading) return;
+
+    const planText = planHandle.current?.getPlanText() ?? "";
+    const userMessage: AskMessage = { role: "user", content: q };
+    setMessages((prev) => [...prev, userMessage]);
+    setInput("");
+    setStreaming("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/chat/clarify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "user",
+              content: `Context - this is the plan: ${planText}\n\nQuestion: ${q}`,
+            },
+          ],
+        }),
+      });
+      if (!res.ok) throw new Error("Request failed");
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No stream");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith("data:")) continue;
+            try {
+              const data = JSON.parse(line.slice(5).trim()) as {
+                delta?: string;
+                error?: string;
+              };
+              if (typeof data.delta === "string") {
+                fullText += data.delta;
+                setStreaming(fullText);
+              }
+            } catch {
+              // skip malformed event
+            }
+          }
+        }
+        if (done) break;
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: fullText },
+      ]);
+      setStreaming("");
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Failed to load" },
+      ]);
+      setStreaming("");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          position: "fixed",
+          bottom: 24,
+          left: "70vw",
+          transform: "translateX(-50%)",
+          zIndex: 100,
+          background: "#ffffff",
+          color: "#1a1a1a",
+          fontSize: 13,
+          fontWeight: 400,
+          padding: "8px 18px",
+          borderRadius: 20,
+          border: "0.5px solid #e0e0e0",
+          cursor: "pointer",
+          boxShadow: "0 2px 12px rgba(0,0,0,0.08)",
+          fontFamily: '"Sentinel", Georgia, "Times New Roman", serif',
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          whiteSpace: "nowrap",
+        }}
+      >
+        <GradientStar size={14} />
+        <span style={{ color: "#1a1a1a" }}>Ask about this plan</span>
+      </button>
+      {open ? (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 70,
+            left: "70vw",
+            transform: "translateX(-50%)",
+            width: 520,
+            maxHeight: 360,
+            background: "#ffffff",
+            borderRadius: 12,
+            boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
+            border: "0.5px solid #e5e5e5",
+            zIndex: 101,
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+            fontFamily: '"Sentinel", Georgia, "Times New Roman", serif',
+            fontWeight: 400,
+            color: "#1a1a1a",
+          }}
+        >
+          <div
+            style={{
+              padding: "12px 16px",
+              borderBottom: "1px solid #eeeeee",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexShrink: 0,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                color: "#1a1a1a",
+              }}
+            >
+              <GradientStar size={14} />
+              <span>Ask about this plan</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              aria-label="Close"
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#999",
+                fontSize: 16,
+                cursor: "pointer",
+                padding: 0,
+                lineHeight: 1,
+                fontFamily: "inherit",
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <div
+            ref={messagesScrollRef}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: "auto",
+              padding: "12px 16px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            {messages.map((m, i) =>
+              m.role === "user" ? (
+                <div
+                  key={i}
+                  style={{
+                    alignSelf: "flex-end",
+                    maxWidth: "80%",
+                    padding: "8px 12px",
+                    fontSize: 13,
+                    fontWeight: 400,
+                    lineHeight: 1.6,
+                    borderRadius: 8,
+                    background: "#f5f5f5",
+                    color: "#1a1a1a",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {m.content}
+                </div>
+              ) : (
+                <div
+                  key={i}
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 400,
+                    lineHeight: 1.6,
+                    color: "#1a1a1a",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {m.content}
+                </div>
+              )
+            )}
+            {loading && !streaming ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 400,
+                  color: "#999999",
+                }}
+              >
+                <GradientStar size={14} />
+                <span>Thinking...</span>
+              </div>
+            ) : null}
+            {streaming ? (
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 400,
+                  lineHeight: 1.6,
+                  color: "#1a1a1a",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {streaming}
+              </div>
+            ) : null}
+          </div>
+          <div
+            style={{
+              borderTop: "1px solid #eeeeee",
+              padding: "10px 16px",
+              flexShrink: 0,
+            }}
+          >
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleSend();
+                }
+              }}
+              placeholder="Ask a follow-up..."
+              disabled={loading}
+              style={{
+                width: "100%",
+                border: "none",
+                outline: "none",
+                fontSize: 13,
+                fontWeight: 400,
+                fontFamily: "inherit",
+                background: "transparent",
+                color: "#1a1a1a",
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+    </>,
+    document.body
+  );
+}
+
 const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
-    const liveblocks = useLiveblocksExtension({ ai: true });
+    const liveblocks = useLiveblocksExtension();
     const editor = useEditor({
       immediatelyRender: false,
       editable: false,
@@ -152,6 +479,14 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
     const editorRef = useRef<Editor | null>(null);
     editorRef.current = editor;
 
+    useEffect(() => {
+      if (!editor || !isReady) return;
+      const hasContent = editor.getText().trim().length > 0;
+      if (hasContent) {
+        editor.setEditable(true);
+      }
+    }, [editor, isReady]);
+
     const { threads } = useThreads();
 
     useImperativeHandle(
@@ -171,6 +506,7 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
           editorRef.current.commands.setContent(html);
           editorRef.current.setEditable(true);
         },
+        getPlanText: () => editorRef.current?.getText() ?? "",
       }),
       []
     );
@@ -204,19 +540,6 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
         </FloatingToolbar>
         <FloatingComposer editor={editor} />
         <FloatingThreads editor={editor} threads={threads} />
-        <AiToolbar
-          editor={editor}
-          suggestions={
-            <>
-              <AiToolbar.Suggestion prompt="Explain this">
-                Explain this
-              </AiToolbar.Suggestion>
-              <AiToolbar.Suggestion prompt="Is this buildable in Wati?">
-                Is this buildable in Wati?
-              </AiToolbar.Suggestion>
-            </>
-          }
-        />
       </div>
     );
   }
@@ -240,6 +563,20 @@ export const PlanEditor = forwardRef<PlanEditorHandle, PlanEditorProps>(
     const [mounted, setMounted] = useState(false);
     useEffect(() => setMounted(true), []);
 
+    const innerHandleRef = useRef<PlanEditorHandle | null>(null);
+    const composedRef = useCallback(
+      (handle: PlanEditorHandle | null) => {
+        innerHandleRef.current = handle;
+        if (typeof ref === "function") {
+          ref(handle);
+        } else if (ref) {
+          (ref as React.MutableRefObject<PlanEditorHandle | null>).current =
+            handle;
+        }
+      },
+      [ref]
+    );
+
     const [renderUpdatingText, setRenderUpdatingText] = useState(false);
     useEffect(() => {
       if (isMakingPlan) {
@@ -260,6 +597,7 @@ export const PlanEditor = forwardRef<PlanEditorHandle, PlanEditorProps>(
     const initial = (userName || "U").trim().charAt(0);
 
     return (
+      <>
       <div
         className={
           isUpdating
@@ -324,8 +662,10 @@ export const PlanEditor = forwardRef<PlanEditorHandle, PlanEditorProps>(
           </div>
         ) : null}
 
-        {mounted ? <TiptapEditor ref={ref} /> : null}
+        {mounted ? <TiptapEditor ref={composedRef} /> : null}
       </div>
+      {planReady ? <AskPanel planHandle={innerHandleRef} /> : null}
+      </>
     );
   }
 );

@@ -15,7 +15,12 @@ export function LiveblocksRoom({ children }: { children: ReactNode }) {
       <RoomProvider
         id={ROOM_ID}
         initialPresence={{}}
-        initialStorage={{ docTitle: "" }}
+        initialStorage={{
+          docTitle: "",
+          planJson: "",
+          planLines: [],
+          chatMessages: [],
+        }}
       >
         <ClientSideSuspense fallback={null}>{children}</ClientSideSuspense>
       </RoomProvider>

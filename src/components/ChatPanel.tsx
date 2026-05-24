@@ -34,7 +34,11 @@ export type ConversationTurn = {
   content: string;
 };
 
+type StoredMessage = { role: string; content: string };
+
 type ChatPanelProps = {
+  initialMessages?: StoredMessage[];
+  onMessagesChange?: (messages: StoredMessage[]) => void;
   onFirstMessage?: (message: string) => void;
   onAgentResponse?: (text: string, conversation: ConversationTurn[]) => void;
   onPlanReady?: () => void;
@@ -42,17 +46,44 @@ type ChatPanelProps = {
 };
 
 export function ChatPanel({
+  initialMessages,
+  onMessagesChange,
   onFirstMessage,
   onAgentResponse,
   onPlanReady,
   planReady = false,
 }: ChatPanelProps = {}) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    (initialMessages ?? [])
+      .filter(
+        (m): m is { role: "user" | "assistant"; content: string } =>
+          (m.role === "user" || m.role === "assistant") &&
+          typeof m.content === "string"
+      )
+      .map((m) => ({
+        id: crypto.randomUUID(),
+        role: m.role,
+        content: m.content,
+      }))
+  );
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState("");
   const [loading, setLoading] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
-  const firstMessageFiredRef = useRef(false);
+  const firstMessageFiredRef = useRef(
+    (initialMessages?.length ?? 0) > 0
+  );
+  const messagesSyncInitRef = useRef(true);
+
+  useEffect(() => {
+    if (messagesSyncInitRef.current) {
+      messagesSyncInitRef.current = false;
+      return;
+    }
+    onMessagesChange?.(
+      messages.map(({ role, content }) => ({ role, content }))
+    );
+  }, [messages, onMessagesChange]);
 
   useEffect(() => {
     listRef.current?.scrollTo({

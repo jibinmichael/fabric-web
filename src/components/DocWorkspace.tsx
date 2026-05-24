@@ -43,14 +43,32 @@ export function DocWorkspace(props: DocWorkspaceProps) {
 
 function DocBody({ userEmail, userName, userAvatar }: DocWorkspaceProps) {
   const storedDocTitle = useStorage((root) => root.docTitle);
+  const storedPlanJson = useStorage((root) => root.planJson);
+  const storedPlanLines = useStorage((root) => root.planLines);
+  const storedChatMessages = useStorage((root) => root.chatMessages);
+
   const updateDocTitle = useMutation(({ storage }, title: string) => {
     storage.set("docTitle", title);
   }, []);
+  const updatePlanJson = useMutation(({ storage }, json: string) => {
+    storage.set("planJson", json);
+  }, []);
+  const updatePlanLines = useMutation(({ storage }, lines: string[]) => {
+    storage.set("planLines", lines);
+  }, []);
+  const updateChatMessages = useMutation(
+    ({ storage }, msgs: { role: string; content: string }[]) => {
+      storage.set("chatMessages", msgs);
+    },
+    []
+  );
 
-  const [planReady, setPlanReady] = useState(false);
+  const [planReady, setPlanReady] = useState(Boolean(storedPlanJson));
   const [streamingTitle, setStreamingTitle] = useState(storedDocTitle ?? "");
   const [isAgentTyping, setIsAgentTyping] = useState(false);
-  const [planLines, setPlanLines] = useState<string[]>([]);
+  const [planLines, setPlanLines] = useState<string[]>(
+    storedPlanLines ? [...storedPlanLines] : []
+  );
   const [isMakingPlan, setIsMakingPlan] = useState(false);
 
   const titleStartedRef = useRef(Boolean(storedDocTitle));
@@ -59,21 +77,32 @@ function DocBody({ userEmail, userName, userAvatar }: DocWorkspaceProps) {
   const extractedTextsRef = useRef<Set<string>>(new Set());
   const agentResponseCountRef = useRef(0);
   const planRequestedRef = useRef(false);
-  const hasMadeFirstPlanRef = useRef(false);
+  const hasMadeFirstPlanRef = useRef(Boolean(storedPlanJson));
   const responsesSinceLastPlanRef = useRef(0);
   const lastConversationRef = useRef<ConversationTurn[]>([]);
   const planEditorRef = useRef<PlanEditorHandle>(null);
+  const planRestoredRef = useRef(false);
+  const planLinesInitRef = useRef(true);
 
   useEffect(() => {
-    setPlanLines([]);
-    setIsAgentTyping(false);
-    agentResponseCountRef.current = 0;
-    planRequestedRef.current = false;
-    hasMadeFirstPlanRef.current = false;
-    responsesSinceLastPlanRef.current = 0;
-    extractedTextsRef.current = new Set();
-    planEditorRef.current?.clearBlockNote();
-  }, []);
+    if (planRestoredRef.current) return;
+    if (!storedPlanJson) return;
+    planRestoredRef.current = true;
+    try {
+      const plan = JSON.parse(storedPlanJson) as PlanData;
+      void planEditorRef.current?.typePlan(plan);
+    } catch {
+      // ignore parse error
+    }
+  }, [storedPlanJson]);
+
+  useEffect(() => {
+    if (planLinesInitRef.current) {
+      planLinesInitRef.current = false;
+      return;
+    }
+    updatePlanLines(planLines);
+  }, [planLines, updatePlanLines]);
 
   const enqueueAnimation = useCallback((task: () => Promise<void>) => {
     pendingTasksRef.current += 1;
@@ -206,6 +235,7 @@ function DocBody({ userEmail, userName, userAvatar }: DocWorkspaceProps) {
     setPlanLines([]);
     try {
       await planEditorRef.current?.typePlan(plan);
+      updatePlanJson(JSON.stringify(plan));
     } catch {
       // typePlan errored; fall through to cleanup
     } finally {
@@ -216,7 +246,7 @@ function DocBody({ userEmail, userName, userAvatar }: DocWorkspaceProps) {
       hasMadeFirstPlanRef.current = true;
       responsesSinceLastPlanRef.current = 0;
     }
-  }, [isMakingPlan]);
+  }, [isMakingPlan, updatePlanJson]);
 
   const handleWritePlan = useCallback(() => {
     if (planRequestedRef.current) {
@@ -403,6 +433,8 @@ function DocBody({ userEmail, userName, userAvatar }: DocWorkspaceProps) {
       <div className="flex h-[calc(100vh-44px)] bg-[#F9F9F9]">
         <div className="w-2/5 bg-white border-r border-[#EEEEEE]">
           <ChatPanel
+            initialMessages={storedChatMessages ?? []}
+            onMessagesChange={updateChatMessages}
             onFirstMessage={handleFirstMessage}
             onAgentResponse={handleAgentResponse}
             onPlanReady={handlePlanReady}

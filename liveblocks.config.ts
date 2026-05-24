@@ -2,6 +2,9 @@ declare global {
   interface Liveblocks {
     Storage: {
       docTitle: string;
+      planJson: string;
+      planLines: string[];
+      chatMessages: { role: string; content: string }[];
     };
     UserMeta: {
       id: string;
