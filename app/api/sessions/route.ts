@@ -1,6 +1,7 @@
 import { kv } from "@vercel/kv";
 import { nanoid } from "nanoid";
-import { auth0 } from "@/lib/auth0";
+
+const DEMO_EMAIL = "demo@wati.io";
 
 type SessionRecord = {
   id: string;
@@ -22,18 +23,8 @@ async function readSessions(email: string): Promise<SessionRecord[]> {
 }
 
 export async function GET() {
-  const session = await auth0.getSession();
-  if (!session?.user) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-  const email =
-    typeof session.user.email === "string" ? session.user.email : "";
-  if (!email) {
-    return Response.json({ sessions: [] });
-  }
-
   try {
-    const sessions = await readSessions(email);
+    const sessions = await readSessions(DEMO_EMAIL);
     return Response.json({ sessions });
   } catch (err) {
     const message = err instanceof Error ? err.message : "KV read failed";
@@ -42,16 +33,6 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const session = await auth0.getSession();
-  if (!session?.user) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-  const email =
-    typeof session.user.email === "string" ? session.user.email : "";
-  if (!email) {
-    return Response.json({ error: "Missing user email" }, { status: 400 });
-  }
-
   const body = (await request
     .json()
     .catch(() => ({}))) as Partial<{
@@ -72,15 +53,15 @@ export async function POST(request: Request) {
     title,
     roomId,
     createdAt: Date.now(),
-    ownerId: email,
+    ownerId: DEMO_EMAIL,
     ownerName,
     ownerAvatar,
   };
 
   try {
-    const existing = await readSessions(email);
+    const existing = await readSessions(DEMO_EMAIL);
     const next = [record, ...existing];
-    await kv.set(sessionsKey(email), next);
+    await kv.set(sessionsKey(DEMO_EMAIL), next);
     return Response.json({ session: record });
   } catch (err) {
     const message = err instanceof Error ? err.message : "KV write failed";

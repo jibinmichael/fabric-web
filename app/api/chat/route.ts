@@ -1,5 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { MessageStreamEvent } from "@anthropic-ai/sdk/resources/messages";
+import type {
+  MessageParam,
+  MessageStreamEvent,
+} from "@anthropic-ai/sdk/resources/messages";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -193,7 +196,7 @@ export async function POST(request: Request) {
           ],
           tools: TOOLS,
           tool_choice: { type: "any" },
-          messages,
+          messages: messages as MessageParam[],
         });
 
         let toolName = "";

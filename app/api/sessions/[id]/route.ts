@@ -1,5 +1,6 @@
 import { kv } from "@vercel/kv";
-import { auth0 } from "@/lib/auth0";
+
+const DEMO_EMAIL = "demo@wati.io";
 
 type SessionRecord = {
   id: string;
@@ -23,16 +24,6 @@ async function readSessions(email: string): Promise<SessionRecord[]> {
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function PATCH(request: Request, ctx: Ctx) {
-  const session = await auth0.getSession();
-  if (!session?.user) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-  const email =
-    typeof session.user.email === "string" ? session.user.email : "";
-  if (!email) {
-    return Response.json({ error: "Missing user email" }, { status: 400 });
-  }
-
   const { id } = await ctx.params;
   const body = (await request
     .json()
@@ -40,14 +31,14 @@ export async function PATCH(request: Request, ctx: Ctx) {
   const title = (body.title ?? "").trim();
 
   try {
-    const sessions = await readSessions(email);
+    const sessions = await readSessions(DEMO_EMAIL);
     const idx = sessions.findIndex((s) => s.id === id);
     if (idx < 0) {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
     const updated: SessionRecord = { ...sessions[idx], title };
     sessions[idx] = updated;
-    await kv.set(sessionsKey(email), sessions);
+    await kv.set(sessionsKey(DEMO_EMAIL), sessions);
     return Response.json({ session: updated });
   } catch (err) {
     const message = err instanceof Error ? err.message : "KV write failed";
@@ -56,22 +47,12 @@ export async function PATCH(request: Request, ctx: Ctx) {
 }
 
 export async function DELETE(_request: Request, ctx: Ctx) {
-  const session = await auth0.getSession();
-  if (!session?.user) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-  const email =
-    typeof session.user.email === "string" ? session.user.email : "";
-  if (!email) {
-    return Response.json({ error: "Missing user email" }, { status: 400 });
-  }
-
   const { id } = await ctx.params;
 
   try {
-    const sessions = await readSessions(email);
+    const sessions = await readSessions(DEMO_EMAIL);
     const next = sessions.filter((s) => s.id !== id);
-    await kv.set(sessionsKey(email), next);
+    await kv.set(sessionsKey(DEMO_EMAIL), next);
     return Response.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "KV write failed";

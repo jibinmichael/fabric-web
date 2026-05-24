@@ -19,7 +19,16 @@ import styles from "./PlanEditor.module.css";
 export function SharedDoc({ roomId }: { roomId: string }) {
   return (
     <LiveblocksProvider authEndpoint="/api/liveblocks-public">
-      <RoomProvider id={roomId} initialPresence={{}}>
+      <RoomProvider
+        id={roomId}
+        initialPresence={{}}
+        initialStorage={{
+          docTitle: "",
+          planJson: "",
+          planLines: [],
+          chatMessages: [],
+        }}
+      >
         <ClientSideSuspense fallback={<Fallback />}>
           <SharedDocBody />
         </ClientSideSuspense>

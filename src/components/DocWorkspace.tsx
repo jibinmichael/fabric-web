@@ -200,7 +200,7 @@ function DocBody({
     []
   );
 
-  const handleFirstMessage = useCallback((_message: string) => {
+  const handleFirstMessage = useCallback(() => {
     // Title generation moved to handlePlanReady so it runs against the full
     // conversation at the moment the plan writes.
   }, []);

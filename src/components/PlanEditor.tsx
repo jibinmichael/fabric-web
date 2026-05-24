@@ -20,7 +20,6 @@ import {
   FloatingToolbar,
   FloatingComposer,
   FloatingThreads,
-  AnchoredThreads,
   Toolbar,
 } from "@liveblocks/react-tiptap";
 import { useThreads } from "@liveblocks/react/suspense";

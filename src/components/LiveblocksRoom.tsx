@@ -29,7 +29,15 @@ export function LiveblocksRoom({
               users?: ({ name: string; avatar?: string; color?: string } | null)[];
             };
             if (Array.isArray(data.users)) {
-              return data.users.map((u) => u ?? undefined);
+              return data.users.map((u) =>
+                u
+                  ? {
+                      name: u.name,
+                      avatar: u.avatar ?? "",
+                      color: u.color ?? "#666666",
+                    }
+                  : undefined
+              );
             }
           }
         } catch {
