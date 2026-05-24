@@ -1,0 +1,41 @@
+/* Global overrides for the Liveblocks comment composer submit button.
+ * FloatingComposer renders into document.body via Popover.Portal, so these
+ * cannot live inside a CSS Module that scopes to an ancestor like .editorWrap.
+ */
+
+.lb-composer-action[data-variant="primary"] {
+  width: 20px !important;
+  height: 20px !important;
+  min-width: 20px !important;
+  border-radius: 9999px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: #2563EB !important;
+  color: #ffffff !important;
+  line-height: 0 !important;
+  font-size: 0 !important;
+}
+
+.lb-composer-action[data-variant="primary"] > * {
+  display: none !important;
+}
+
+.lb-composer-action[data-variant="primary"]::after {
+  content: "" !important;
+  display: block !important;
+  position: static !important;
+  inset: auto !important;
+  width: 12px !important;
+  height: 12px !important;
+  background: #ffffff !important;
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='12' y1='19' x2='12' y2='5'/%3E%3Cpolyline points='5 12 12 5 19 12'/%3E%3C/svg%3E") !important;
+  mask-repeat: no-repeat !important;
+  mask-position: center !important;
+  mask-size: contain !important;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='12' y1='19' x2='12' y2='5'/%3E%3Cpolyline points='5 12 12 5 19 12'/%3E%3C/svg%3E") !important;
+  -webkit-mask-repeat: no-repeat !important;
+  -webkit-mask-position: center !important;
+  -webkit-mask-size: contain !important;
+}

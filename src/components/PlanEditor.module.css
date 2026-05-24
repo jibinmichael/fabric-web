@@ -371,3 +371,4 @@
 .editorWrap.isUpdating :global(.ProseMirror) {
   animation: shimmer 1.5s ease infinite;
 }
+

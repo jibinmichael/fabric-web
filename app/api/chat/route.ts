@@ -78,7 +78,17 @@ const TOOLS = [
   },
 ];
 
-type ChatMessage = { role: "user" | "assistant"; content: string };
+type ContentBlock =
+  | { type: "text"; text: string }
+  | {
+      type: "image";
+      source: { type: "base64"; media_type: string; data: string };
+    };
+
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string | ContentBlock[];
+};
 
 function sseLine(payload: Record<string, unknown>): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`);

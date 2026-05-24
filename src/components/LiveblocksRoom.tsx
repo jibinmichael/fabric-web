@@ -15,7 +15,29 @@ export function LiveblocksRoom({
   children: ReactNode;
 }) {
   return (
-    <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
+    <LiveblocksProvider
+      authEndpoint="/api/liveblocks-auth"
+      resolveUsers={async ({ userIds }) => {
+        try {
+          const res = await fetch("/api/liveblocks-auth/users", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userIds }),
+          });
+          if (res.ok) {
+            const data = (await res.json()) as {
+              users?: ({ name: string; avatar?: string; color?: string } | null)[];
+            };
+            if (Array.isArray(data.users)) {
+              return data.users.map((u) => u ?? undefined);
+            }
+          }
+        } catch {
+          // fall through to undefined array
+        }
+        return userIds.map(() => undefined);
+      }}
+    >
       <RoomProvider
         id={roomId}
         initialPresence={{}}

@@ -20,11 +20,13 @@ import {
   FloatingToolbar,
   FloatingComposer,
   FloatingThreads,
+  AnchoredThreads,
   Toolbar,
 } from "@liveblocks/react-tiptap";
 import { useThreads } from "@liveblocks/react/suspense";
 import "@liveblocks/react-ui/styles.css";
 import "@liveblocks/react-tiptap/styles.css";
+import "./composer-overrides.css";
 import styles from "./PlanEditor.module.css";
 
 export type PlanData = {
@@ -539,6 +541,10 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
             name="Task list"
             active={editor?.isActive("taskList") ?? false}
             onClick={() => editor?.chain().focus().toggleTaskList().run()}
+          />
+          <Toolbar.Button
+            name="Comment"
+            onClick={() => editor?.chain().focus().addPendingComment().run()}
           />
         </FloatingToolbar>
         <FloatingComposer editor={editor} />

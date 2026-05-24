@@ -3,10 +3,34 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import styles from "./ChatPanel.module.css";
 
+type ChatAttachment =
+  | {
+      id: string;
+      kind: "image";
+      name: string;
+      mediaType: string;
+      previewUrl: string;
+      base64: string;
+    }
+  | {
+      id: string;
+      kind: "text";
+      name: string;
+      content: string;
+    };
+
+type ApiContentBlock =
+  | { type: "text"; text: string }
+  | {
+      type: "image";
+      source: { type: "base64"; media_type: string; data: string };
+    };
+
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  attachments?: ChatAttachment[];
 };
 
 function parseSseChunk(buffer: string) {
@@ -27,6 +51,64 @@ function parseSseChunk(buffer: string) {
   }
 
   return { events, rest };
+}
+
+function readAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(typeof r.result === "string" ? r.result : "");
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+}
+
+function readAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(typeof r.result === "string" ? r.result : "");
+    r.onerror = () => reject(r.error);
+    r.readAsText(file);
+  });
+}
+
+function buildApiContent(
+  text: string,
+  atts: ChatAttachment[]
+): string | ApiContentBlock[] {
+  const imageAtts = atts.filter(
+    (a): a is Extract<ChatAttachment, { kind: "image" }> => a.kind === "image"
+  );
+  const textAtts = atts.filter(
+    (a): a is Extract<ChatAttachment, { kind: "text" }> => a.kind === "text"
+  );
+
+  let combinedText = text;
+  if (textAtts.length > 0) {
+    const blocks = textAtts
+      .map((a) => `[Attachment: ${a.name}]\n${a.content}`)
+      .join("\n\n");
+    combinedText = blocks + (text ? `\n\n${text}` : "");
+  }
+
+  if (imageAtts.length === 0) {
+    return combinedText;
+  }
+
+  const result: ApiContentBlock[] = [];
+  for (const img of imageAtts) {
+    result.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: img.mediaType,
+        data: img.base64,
+      },
+    });
+  }
+  if (combinedText) {
+    result.push({ type: "text", text: combinedText });
+  }
+  return result;
 }
 
 export type ConversationTurn = {
@@ -69,11 +151,71 @@ export function ChatPanel({
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState("");
   const [loading, setLoading] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<
+    ChatAttachment[]
+  >([]);
   const listRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const firstMessageFiredRef = useRef(
     (initialMessages?.length ?? 0) > 0
   );
   const messagesSyncInitRef = useRef(true);
+
+  const openFilePicker = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => {
+    setPendingAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  const handleFileChange = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(event.target.files ?? []);
+      event.target.value = "";
+
+      for (const file of files) {
+        if (file.size > 4 * 1024 * 1024) continue;
+        const id = crypto.randomUUID();
+
+        if (file.type.startsWith("image/")) {
+          try {
+            const dataUrl = await readAsDataURL(file);
+            const base64 = dataUrl.split(",")[1] ?? "";
+            setPendingAttachments((prev) => [
+              ...prev,
+              {
+                id,
+                kind: "image",
+                name: file.name,
+                mediaType: file.type || "image/jpeg",
+                previewUrl: dataUrl,
+                base64,
+              },
+            ]);
+          } catch {
+            // skip unreadable file
+          }
+        } else {
+          try {
+            const content = await readAsText(file);
+            setPendingAttachments((prev) => [
+              ...prev,
+              {
+                id,
+                kind: "text",
+                name: file.name,
+                content: content.slice(0, 50000),
+              },
+            ]);
+          } catch {
+            // skip unreadable file
+          }
+        }
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (messagesSyncInitRef.current) {
@@ -94,30 +236,35 @@ export function ChatPanel({
 
   const sendMessage = useCallback(async () => {
     const trimmed = input.trim();
-    if (!trimmed || loading) {
+    if ((!trimmed && pendingAttachments.length === 0) || loading) {
       return;
     }
 
+    const attachmentsToSend = pendingAttachments;
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
       content: trimmed,
+      attachments:
+        attachmentsToSend.length > 0 ? attachmentsToSend : undefined,
     };
 
     setInput("");
+    setPendingAttachments([]);
     setLoading(true);
     setStreaming("");
     setMessages((prev) => [...prev, userMessage]);
 
-    if (!firstMessageFiredRef.current) {
+    if (!firstMessageFiredRef.current && trimmed) {
       firstMessageFiredRef.current = true;
       onFirstMessage?.(trimmed);
     }
 
-    const history = [...messages, userMessage].map((message) => ({
-      role: message.role,
-      content: message.content,
-    }));
+    const apiContent = buildApiContent(trimmed, attachmentsToSend);
+    const history = [
+      ...messages.map((m) => ({ role: m.role, content: m.content })),
+      { role: userMessage.role, content: apiContent },
+    ];
 
     try {
       const endpoint = planReady ? "/api/chat/clarify" : "/api/chat";
@@ -204,6 +351,7 @@ export function ChatPanel({
     input,
     loading,
     messages,
+    pendingAttachments,
     onFirstMessage,
     onAgentResponse,
     onPlanReady,
@@ -217,6 +365,52 @@ export function ChatPanel({
           {messages.map((message) =>
             message.role === "user" ? (
               <div key={message.id} className={styles.userMessage}>
+                {message.attachments && message.attachments.length > 0 ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 6,
+                      marginBottom: message.content ? 8 : 0,
+                    }}
+                  >
+                    {message.attachments.map((a) =>
+                      a.kind === "image" ? (
+                        <img
+                          key={a.id}
+                          src={a.previewUrl}
+                          alt={a.name}
+                          style={{
+                            width: 80,
+                            height: 80,
+                            borderRadius: 6,
+                            objectFit: "cover",
+                            display: "block",
+                          }}
+                        />
+                      ) : (
+                        <span
+                          key={a.id}
+                          style={{
+                            display: "inline-block",
+                            padding: "4px 8px",
+                            background: "rgba(0,0,0,0.06)",
+                            borderRadius: 6,
+                            fontSize: 12,
+                            color: "#1a1a1a",
+                            maxWidth: 220,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                          title={a.name}
+                        >
+                          📎 {a.name}
+                        </span>
+                      )
+                    )}
+                  </div>
+                ) : null}
                 {message.content}
               </div>
             ) : (
@@ -261,6 +455,85 @@ export function ChatPanel({
       </div>
 
       <div className={styles.inputRegion}>
+        {pendingAttachments.length > 0 ? (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 6,
+              marginBottom: 8,
+            }}
+          >
+            {pendingAttachments.map((a) => (
+              <div
+                key={a.id}
+                style={{
+                  position: "relative",
+                  display: "inline-flex",
+                  alignItems: "center",
+                }}
+              >
+                {a.kind === "image" ? (
+                  <img
+                    src={a.previewUrl}
+                    alt={a.name}
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: 6,
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                  />
+                ) : (
+                  <span
+                    style={{
+                      display: "inline-block",
+                      padding: "4px 10px",
+                      background: "#f0f0f0",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: "#1a1a1a",
+                      maxWidth: 220,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={a.name}
+                  >
+                    📎 {a.name}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(a.id)}
+                  aria-label="Remove attachment"
+                  style={{
+                    position: "absolute",
+                    top: -6,
+                    right: -6,
+                    width: 18,
+                    height: 18,
+                    borderRadius: 9999,
+                    background: "#1a1a1a",
+                    color: "#ffffff",
+                    border: "none",
+                    fontSize: 11,
+                    lineHeight: 1,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: 0,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className={styles.inputWrap}>
           <span className={styles.prompt} aria-hidden>
             ›
@@ -271,6 +544,11 @@ export function ChatPanel({
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
+                if (input.trim() === "/attach") {
+                  setInput("");
+                  openFilePicker();
+                  return;
+                }
                 void sendMessage();
               }
             }}
@@ -284,10 +562,23 @@ export function ChatPanel({
         <div className={styles.footer}>
           <span className={styles.footerHint}>enter to send</span>
           <span aria-hidden>·</span>
-          <button type="button" className={styles.footerAction}>
+          <button
+            type="button"
+            className={styles.footerAction}
+            onClick={openFilePicker}
+          >
             /attach
           </button>
         </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,.pdf,.doc,.docx,.txt,.md"
+          onChange={handleFileChange}
+          style={{ display: "none" }}
+        />
       </div>
     </section>
   );

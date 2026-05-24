@@ -64,12 +64,26 @@ function DocBody({
   userEmail,
   userName,
   userAvatar,
+  roomId,
   sidebarCollapsed,
   onToggleSidebar,
 }: DocWorkspaceProps & {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
 }) {
+  const [copied, setCopied] = useState(false);
+  const handleShare = useCallback(async () => {
+    const url = `${window.location.origin}/doc/shared?room=${encodeURIComponent(
+      roomId
+    )}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      window.prompt("Copy this link:", url);
+    }
+  }, [roomId]);
   const storedDocTitle = useStorage((root) => root.docTitle);
   const storedPlanJson = useStorage((root) => root.planJson);
   const storedPlanLines = useStorage((root) => root.planLines);
@@ -357,7 +371,7 @@ function DocBody({
               color: "#666666",
               background: "transparent",
               border: "none",
-              borderRadius: 6,
+              borderRadius: 9999,
               cursor: "pointer",
               transition: "background-color 150ms ease",
               display: "inline-flex",
@@ -451,11 +465,12 @@ function DocBody({
 
           <button
             type="button"
+            onClick={handleShare}
             style={{
               fontSize: 12,
               fontWeight: 500,
               padding: "4px 12px",
-              borderRadius: 5,
+              borderRadius: 9999,
               border: "1px solid #EEEEEE",
               background: "#fff",
               color: "#666",
@@ -464,7 +479,7 @@ function DocBody({
               lineHeight: 1,
             }}
           >
-            Share
+            {copied ? "Copied!" : "Share"}
           </button>
         </div>
       </header>
