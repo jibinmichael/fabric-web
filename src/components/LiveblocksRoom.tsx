@@ -7,13 +7,17 @@ import {
   ClientSideSuspense,
 } from "@liveblocks/react/suspense";
 
-export const ROOM_ID = "fabricv3:doc-1";
-
-export function LiveblocksRoom({ children }: { children: ReactNode }) {
+export function LiveblocksRoom({
+  roomId,
+  children,
+}: {
+  roomId: string;
+  children: ReactNode;
+}) {
   return (
     <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
       <RoomProvider
-        id={ROOM_ID}
+        id={roomId}
         initialPresence={{}}
         initialStorage={{
           docTitle: "",

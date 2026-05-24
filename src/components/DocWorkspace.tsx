@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, Home } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useMutation, useStorage } from "@liveblocks/react/suspense";
 import { ChatPanel, type ConversationTurn } from "./ChatPanel";
 import {
@@ -10,11 +10,13 @@ import {
   type PlanEditorHandle,
 } from "./PlanEditor";
 import { LiveblocksRoom } from "./LiveblocksRoom";
+import { Sidebar } from "./Sidebar";
 
 type DocWorkspaceProps = {
   userEmail: string;
   userName: string;
   userAvatar: string;
+  roomId: string;
 };
 
 function splitSentences(text: string): string[] {
@@ -34,14 +36,40 @@ function formatConversation(turns: ConversationTurn[]): string {
 }
 
 export function DocWorkspace(props: DocWorkspaceProps) {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const toggleSidebar = () => setSidebarCollapsed((v) => !v);
   return (
-    <LiveblocksRoom>
-      <DocBody {...props} />
-    </LiveblocksRoom>
+    <div className="flex h-screen w-screen overflow-hidden bg-white">
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        currentRoomId={props.roomId}
+        ownerEmail={props.userEmail}
+        ownerName={props.userName}
+        ownerAvatar={props.userAvatar}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <LiveblocksRoom roomId={props.roomId}>
+          <DocBody
+            {...props}
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={toggleSidebar}
+          />
+        </LiveblocksRoom>
+      </div>
+    </div>
   );
 }
 
-function DocBody({ userEmail, userName, userAvatar }: DocWorkspaceProps) {
+function DocBody({
+  userEmail,
+  userName,
+  userAvatar,
+  sidebarCollapsed,
+  onToggleSidebar,
+}: DocWorkspaceProps & {
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+}) {
   const storedDocTitle = useStorage((root) => root.docTitle);
   const storedPlanJson = useStorage((root) => root.planJson);
   const storedPlanLines = useStorage((root) => root.planLines);
@@ -158,43 +186,46 @@ function DocBody({ userEmail, userName, userAvatar }: DocWorkspaceProps) {
     []
   );
 
-  const handleFirstMessage = useCallback(
-    (message: string) => {
-      if (titleStartedRef.current) {
+  const handleFirstMessage = useCallback((_message: string) => {
+    // Title generation moved to handlePlanReady so it runs against the full
+    // conversation at the moment the plan writes.
+  }, []);
+
+  const generateTitleFromConversation = useCallback(() => {
+    if (titleStartedRef.current) return;
+    titleStartedRef.current = true;
+
+    const conversation = lastConversationRef.current;
+    if (!conversation.length) {
+      titleStartedRef.current = false;
+      return;
+    }
+    const text = formatConversation(conversation);
+
+    enqueueAnimation(async () => {
+      let title = "";
+      try {
+        const res = await fetch("/api/chat/title", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text }),
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { title?: string };
+        title = (data.title ?? "").trim();
+      } catch {
         return;
       }
-      titleStartedRef.current = true;
+      if (!title) return;
 
-      enqueueAnimation(async () => {
-        let title = "";
-        try {
-          const res = await fetch("/api/chat/title", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message }),
-          });
-          if (!res.ok) {
-            return;
-          }
-          const data = (await res.json()) as { title?: string };
-          title = (data.title ?? "").trim();
-        } catch {
-          return;
-        }
-        if (!title) {
-          return;
-        }
-
-        setStreamingTitle("");
-        for (let i = 1; i <= title.length; i++) {
-          setStreamingTitle(title.slice(0, i));
-          await new Promise((resolve) => setTimeout(resolve, 80));
-        }
-        updateDocTitle(title);
-      });
-    },
-    [enqueueAnimation, updateDocTitle]
-  );
+      setStreamingTitle("");
+      for (let i = 1; i <= title.length; i++) {
+        setStreamingTitle(title.slice(0, i));
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+      updateDocTitle(title);
+    });
+  }, [enqueueAnimation, updateDocTitle]);
 
   const makePlan = useCallback(async () => {
     if (isMakingPlan) {
@@ -285,8 +316,9 @@ function DocBody({ userEmail, userName, userAvatar }: DocWorkspaceProps) {
 
   const handlePlanReady = useCallback(() => {
     setPlanReady(true);
+    generateTitleFromConversation();
     handleWritePlan();
-  }, [handleWritePlan]);
+  }, [generateTitleFromConversation, handleWritePlan]);
 
   const initial = (userName || "U").trim().charAt(0).toUpperCase();
 
@@ -313,32 +345,39 @@ function DocBody({ userEmail, userName, userAvatar }: DocWorkspaceProps) {
             alignItems: "center",
           }}
         >
-          <div
+          <button
+            type="button"
+            onClick={onToggleSidebar}
+            aria-label={
+              sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+            }
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             style={{
-              display: "flex",
+              padding: 6,
+              color: "#666666",
+              background: "transparent",
+              border: "none",
+              borderRadius: 6,
+              cursor: "pointer",
+              transition: "background-color 150ms ease",
+              display: "inline-flex",
               alignItems: "center",
-              gap: 5,
-              padding: "4px 8px",
-              border: "0.5px solid #ebebeb",
-              borderRadius: 9999,
-              background: "#fff",
+              justifyContent: "center",
+              fontFamily: "inherit",
             }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.backgroundColor = "#EEEEEE")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.backgroundColor = "transparent")
+            }
           >
-            <ChevronLeft
-              size={15}
-              strokeWidth={2}
-              fill="none"
-              color="#b6b6b1"
-              style={{ flexShrink: 0 }}
-            />
-            <Home
-              size={14}
-              strokeWidth={2}
-              fill="none"
-              color="#8a8a85"
-              style={{ flexShrink: 0 }}
-            />
-          </div>
+            {sidebarCollapsed ? (
+              <PanelLeftOpen size={14} strokeWidth={1.75} />
+            ) : (
+              <PanelLeftClose size={14} strokeWidth={1.75} />
+            )}
+          </button>
         </div>
 
 
@@ -443,7 +482,7 @@ function DocBody({ userEmail, userName, userAvatar }: DocWorkspaceProps) {
         </div>
         <div
           className="flex-1 bg-[#F9F9F9] overflow-y-auto"
-          style={{ padding: 0 }}
+          style={{ padding: "0 24px" }}
         >
           <div
             style={{

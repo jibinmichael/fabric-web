@@ -41,7 +41,7 @@ export async function POST() {
     userInfo: { name, avatar, color },
   });
 
-  liveSession.allow("fabricv3:doc-1", liveSession.FULL_ACCESS);
+  liveSession.allow("fabricv3:*", liveSession.FULL_ACCESS);
 
   const { status, body } = await liveSession.authorize();
   return new Response(body, { status });

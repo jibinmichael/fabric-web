@@ -31,6 +31,7 @@ Rules:
 - Never output plain text without a tool call
 - ask_question: first sentence states one sharp insight about the problem. Second sentence is the question.
 - Only call signal_plan_ready when you know: the core problem, who is affected, and what good looks like
+- Never call signal_plan_ready on greetings, small talk, or messages that don't describe a real product problem. Only call signal_plan_ready when the user has described a specific product problem with enough context to write a plan.
 - Never ask about team size, budget, or developers
 - Wati is WhatsApp only. No email.`;
 

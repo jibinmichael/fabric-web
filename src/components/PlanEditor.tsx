@@ -101,7 +101,10 @@ function buildPlanHtml(plan: PlanData): string {
     parts.push(`<hr>`);
     parts.push(`<h2>API gaps</h2>`);
     for (const gap of plan.apiGaps) {
-      const cleanGap = gap.replace(/[⚠️△]/g, "").trim();
+      const cleanGap = gap
+        .replace(/[⚠️△]/g, "")
+        .replace(/^\s*GAP\s*:?\s*/i, "")
+        .trim();
       parts.push(
         `<p style="color: #dc2626; font-size: 14px; line-height: 1.7;">* ${escapeHtml(cleanGap)}</p>`
       );

@@ -2,8 +2,11 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const MODEL = "claude-sonnet-4-20250514";
 
-const SYSTEM_PROMPT =
-  "Return only a 3-5 word title summarizing what the user wants to build. No punctuation. No explanation. Just the title words.";
+const SYSTEM_PROMPT = `Generate a 3-5 word title for a product planning session based on this conversation.
+The title should describe the specific product problem being solved.
+Never generate titles like 'Need More Context' 'General Greeting' or 'Untitled Session'.
+If the conversation is a greeting or too vague to title, return exactly: 'Untitled'
+Return only the title. No punctuation.`;
 
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
