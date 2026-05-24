@@ -364,6 +364,8 @@
 
 .editorWrap :global(.ProseMirror) {
   transition: opacity 300ms ease;
+  outline: none !important;
+  border: none !important;
 }
 
 .editorWrap.isUpdating :global(.ProseMirror) {

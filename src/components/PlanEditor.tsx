@@ -169,6 +169,7 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
           }
           const html = buildPlanHtml(plan);
           editorRef.current.commands.setContent(html);
+          editorRef.current.setEditable(true);
         },
       }),
       []
