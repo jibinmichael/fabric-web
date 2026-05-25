@@ -21,7 +21,14 @@ import {
   FloatingThreads,
   Toolbar,
 } from "@liveblocks/react-tiptap";
-import { useOthers, useRoom, useSelf, useThreads } from "@liveblocks/react/suspense";
+import {
+  useMutation,
+  useOthers,
+  useRoom,
+  useSelf,
+  useStorage,
+  useThreads,
+} from "@liveblocks/react/suspense";
 import "@liveblocks/react-ui/styles.css";
 import "@liveblocks/react-tiptap/styles.css";
 import "./composer-overrides.css";
@@ -51,6 +58,13 @@ export type PlanEditorHandle = {
   patchSection: (section: PlanSectionKey, newContent: string) => boolean;
 };
 
+// ─── Presence item (passed in from DocWorkspace) ──────────────────────────────
+export type OthersPresenceItem = {
+  name: string;
+  section: string | null;
+  color: string;
+};
+
 type PlanEditorProps = {
   userEmail: string;
   userName: string;
@@ -64,6 +78,7 @@ type PlanEditorProps = {
   agentStatus?: boolean;
   roomId?: string;
   role?: string;
+  othersPresence?: OthersPresenceItem[];
 };
 
 type RoleBadgeConfig = {
@@ -102,6 +117,7 @@ function escapeHtml(s: string): string {
 function buildPlanHtml(plan: PlanData): string {
   const parts: string[] = [];
 
+  parts.push(`<hr>`);
   parts.push(`<h2>Problem</h2>`);
   parts.push(`<p>${escapeHtml(plan.problem ?? "")}</p>`);
 
@@ -190,10 +206,14 @@ function extractCommentText(body: unknown): string {
     .trim();
 }
 
-// AskPanel, GradientStar, and the floating Ask AI flow were removed in favour
-// of an inline joiner chat that lives in DocWorkspace.
+// ─── TiptapEditor ─────────────────────────────────────────────────────────────
 
-const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
+type TiptapEditorProps = {
+  othersPresence: OthersPresenceItem[];
+};
+
+const TiptapEditor = forwardRef<PlanEditorHandle, TiptapEditorProps>(
+  ({ othersPresence }, ref) => {
     const liveblocks = useLiveblocksExtension();
     const editor = useEditor({
       immediatelyRender: false,
@@ -206,10 +226,7 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
       },
       extensions: [
         liveblocks,
-        StarterKit.configure({
-          // Liveblocks extension manages history; must be disabled per skill docs
-          undoRedo: false,
-        }),
+        StarterKit.configure({ undoRedo: false }),
         TaskList,
         TaskItem.configure({ nested: false }),
         Placeholder.configure({
@@ -224,6 +241,48 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
     const editorRef = useRef<Editor | null>(null);
     editorRef.current = editor;
 
+    // ── Thing 3: gapPosted — fires exactly once per room ──────────────────────
+    const gapPosted = useStorage((root) => root.gapPosted);
+    const gapPostedRef = useRef<boolean>(false);
+    useEffect(() => {
+      gapPostedRef.current = gapPosted ?? false;
+    }, [gapPosted]);
+
+    const markGapPosted = useMutation(({ storage }) => {
+      storage.set("gapPosted", true);
+    }, []);
+    const markGapPostedRef = useRef(markGapPosted);
+    markGapPostedRef.current = markGapPosted;
+
+    // ── Thing 2: heading positions for presence overlay ───────────────────────
+    const hostRef = useRef<HTMLDivElement | null>(null);
+    const [headingPositions, setHeadingPositions] = useState<
+      { text: string; top: number }[]
+    >([]);
+
+    const measureHeadings = useCallback(() => {
+      const host = hostRef.current;
+      if (!host) return;
+      const h2s = host.querySelectorAll(".ProseMirror h2");
+      const hostRect = host.getBoundingClientRect();
+      const positions = Array.from(h2s).map((el) => ({
+        text: (el.textContent ?? "").trim(),
+        top:
+          (el as HTMLElement).getBoundingClientRect().top - hostRect.top,
+      }));
+      setHeadingPositions(positions);
+    }, []);
+
+    useEffect(() => {
+      if (!editor) return;
+      measureHeadings();
+      editor.on("update", measureHeadings);
+      return () => {
+        editor.off("update", measureHeadings);
+      };
+    }, [editor, measureHeadings]);
+
+    // ── Editability sync ──────────────────────────────────────────────────────
     useEffect(() => {
       if (!editor || !isReady) return;
       const hasContent = editor.getText().trim().length > 0;
@@ -232,6 +291,7 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
       }
     }, [editor, isReady]);
 
+    // ── Threads / agent-replies ───────────────────────────────────────────────
     const { threads } = useThreads();
     const room = useRoom();
     const self = useSelf();
@@ -242,8 +302,6 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
       if (!threads) return;
       const selfId = self?.id;
 
-      // On first run, mark every existing comment as already processed so we
-      // don't fire agent replies for the pre-loaded thread history.
       if (!seededAgentRepliesRef.current) {
         seededAgentRepliesRef.current = true;
         for (const t of threads) {
@@ -259,8 +317,6 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
           if (processedCommentIdsRef.current.has(c.id)) continue;
           processedCommentIdsRef.current.add(c.id);
           if (c.userId === "agent-1") continue;
-          // Only the comment author's client fires the agent-reply call to
-          // avoid duplicates from multiple connected viewers.
           if (!selfId || c.userId !== selfId) continue;
 
           const commentText = extractCommentText(c.body);
@@ -285,25 +341,21 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
               const reply =
                 typeof data.reply === "string" ? data.reply : "";
               if (!reply || reply.trim().length < 10) return;
-              // Reply is valid; the server has already posted it to the
-              // thread via Liveblocks. Liveblocks sync will surface it.
             })
-            .catch(() => {
-              // best-effort, ignore errors
-            });
+            .catch(() => {});
         }
       }
     }, [threads, room.id, self?.id]);
 
+    // ── Imperative handle ─────────────────────────────────────────────────────
     useImperativeHandle(
       ref,
       () => ({
         clearBlockNote: () => {
-          if (!isReadyRef.current || !editorRef.current) {
-            return;
-          }
+          if (!isReadyRef.current || !editorRef.current) return;
           editorRef.current.commands.clearContent();
         },
+
         typePlan: async (plan: PlanData) => {
           while (!isReadyRef.current || !editorRef.current) {
             await sleep(50);
@@ -312,11 +364,14 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
           editorRef.current.commands.setContent(html);
           editorRef.current.setEditable(true);
 
-          // Fire-and-forget: let the gap-spotter agent review the freshly
-          // written plan and proactively post one sharp question as a comment.
+          // ── Thing 1 + Thing 3: agent-gap → inline comment ──────────────────
           setTimeout(() => {
+            // Skip if gap was already posted for this room (Thing 3).
+            if (gapPostedRef.current) return;
+
             const planText = editorRef.current?.getText() ?? "";
             if (!planText) return;
+
             void fetch("/api/agent-gap", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -325,11 +380,109 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
                 chatHistory: [],
                 roomId: room.id,
               }),
-            }).catch(() => {
-              // best-effort, swallow errors
-            });
+            })
+              .then(async (res) => {
+                if (!res.ok) return;
+                const data = (await res.json().catch(() => null)) as {
+                  gap?: string | null;
+                  section?: string | null;
+                  nextAction?: string | null;
+                } | null;
+
+                if (!data?.gap || !data.gap.trim()) return;
+                const gap = data.gap.trim();
+                const section =
+                  typeof data.section === "string"
+                    ? data.section.trim()
+                    : "";
+                if (!section) {
+                  markGapPostedRef.current();
+                  return;
+                }
+
+                const editorInstance = editorRef.current;
+                if (!editorInstance) {
+                  markGapPostedRef.current();
+                  return;
+                }
+
+                // Walk doc to find the matching heading, then the first
+                // paragraph after it. Select first ~10 words of that paragraph.
+                let headingFound = false;
+                let targetFrom = -1;
+                let targetTo = -1;
+
+                editorInstance.state.doc.descendants((node, pos) => {
+                  if (targetFrom >= 0) return false;
+
+                  if (!headingFound) {
+                    if (
+                      node.type.name === "heading" &&
+                      node.textContent.toLowerCase() ===
+                        section.toLowerCase()
+                    ) {
+                      headingFound = true;
+                    }
+                    return true;
+                  }
+
+                  // After heading — find first paragraph with text.
+                  if (
+                    node.type.name === "paragraph" &&
+                    node.textContent.trim().length > 0
+                  ) {
+                    const text = node.textContent;
+                    const words = text
+                      .split(/\s+/)
+                      .filter(Boolean)
+                      .slice(0, 10);
+                    if (words.length > 0) {
+                      const selectedLength = words.join(" ").length;
+                      targetFrom = pos + 1;
+                      targetTo = Math.min(
+                        pos + 1 + selectedLength,
+                        pos + node.nodeSize - 1
+                      );
+                    }
+                    return false;
+                  }
+                  return true;
+                });
+
+                if (targetFrom >= 0 && targetTo > targetFrom) {
+                  editorInstance
+                    .chain()
+                    .focus()
+                    .setTextSelection({ from: targetFrom, to: targetTo })
+                    .addPendingComment()
+                    .run();
+
+                  setTimeout(() => {
+                    try {
+                      const composer = document.querySelector(
+                        ".lb-composer-editor [contenteditable]"
+                      ) as HTMLElement | null;
+                      if (composer) {
+                        composer.focus();
+                        document.execCommand("selectAll", false);
+                        document.execCommand("insertText", false, gap);
+                      }
+                    } catch {
+                      // silent fail — one shot only
+                    }
+                    markGapPostedRef.current();
+                  }, 600);
+                } else {
+                  // No matching paragraph found — still mark to avoid retry.
+                  markGapPostedRef.current();
+                }
+              })
+              .catch(() => {
+                // silent
+              });
           }, 2000);
 
+          // Fade-in animation for plan sections.
           setTimeout(() => {
             const proseMirror = document.querySelector(".ProseMirror");
             if (!proseMirror) return;
@@ -348,7 +501,9 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
             });
           }, 100);
         },
+
         getPlanText: () => editorRef.current?.getText() ?? "",
+
         patchSection: (section, newContent) => {
           const editor = editorRef.current;
           if (!editor) return false;
@@ -377,8 +532,6 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
           const insertPos = next
             ? next.pos
             : editor.state.doc.content.size;
-          // Anchor the insert just before the next section's heading so the
-          // new paragraph lands at the end of the target section.
           const safePos = Math.min(insertPos, editor.state.doc.content.size);
 
           editor
@@ -389,14 +542,15 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
               content: [{ type: "text", text: newContent }],
             })
             .run();
-          // Make sure we don't accidentally consume target.size
           void target;
           return true;
         },
       }),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       []
     );
 
+    // ── Comment row derived values ─────────────────────────────────────────────
     const uniqueCommenterIds: string[] = (() => {
       const result: string[] = [];
       const seen = new Set<string>();
@@ -414,8 +568,76 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
       ? threads.reduce((sum, t) => sum + t.comments.length, 0)
       : 0;
 
+    // ── Render ────────────────────────────────────────────────────────────────
     return (
-      <div className={styles.blocknoteHost}>
+      <div ref={hostRef} className={styles.blocknoteHost}>
+        {/* Thing 2: presence avatars floating beside each section heading */}
+        {headingPositions.map(({ text, top }) => {
+          const viewers = othersPresence.filter(
+            (p) =>
+              p.section &&
+              p.section.toLowerCase() === text.toLowerCase()
+          );
+          if (!viewers.length) return null;
+          const shown = viewers.slice(0, 2);
+          const extra = viewers.length - 2;
+          return (
+            <div
+              key={text}
+              style={{
+                position: "absolute",
+                right: -32,
+                top,
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              {shown.map((v, i) => (
+                <img
+                  key={v.name + String(i)}
+                  src={`https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(v.name)}`}
+                  alt=""
+                  title={v.name}
+                  referrerPolicy="no-referrer"
+                  style={{
+                    width: 20,
+                    height: 20,
+                    borderRadius: "50%",
+                    border: "2px solid #ffffff",
+                    overflow: "hidden",
+                    objectFit: "cover",
+                    marginLeft: i === 0 ? 0 : -6,
+                    position: "relative",
+                    zIndex: shown.length - i,
+                  }}
+                />
+              ))}
+              {extra > 0 && (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 20,
+                    height: 20,
+                    borderRadius: "50%",
+                    background: "#f5f5f5",
+                    border: "2px solid #ffffff",
+                    marginLeft: -6,
+                    fontSize: 9,
+                    fontWeight: 500,
+                    color: "#6b6b6b",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  +{extra}
+                </span>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Comment count row */}
         {threads && threads.length > 0 ? (
           <>
             <div className={styles.commentRow}>
@@ -446,6 +668,7 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
             <hr className={styles.sectionDivider} />
           </>
         ) : null}
+
         <EditorContent editor={editor} />
         <FloatingToolbar editor={editor}>
           <Toolbar.Toggle
@@ -483,6 +706,8 @@ const TiptapEditor = forwardRef<PlanEditorHandle>((_, ref) => {
 );
 TiptapEditor.displayName = "TiptapEditor";
 
+// ─── PlanEditor (outer shell) ─────────────────────────────────────────────────
+
 export const PlanEditor = forwardRef<PlanEditorHandle, PlanEditorProps>(
   function PlanEditor(
     {
@@ -497,6 +722,7 @@ export const PlanEditor = forwardRef<PlanEditorHandle, PlanEditorProps>(
       agentStatus = false,
       roomId,
       role,
+      othersPresence = [],
     },
     ref
   ) {
@@ -548,231 +774,228 @@ export const PlanEditor = forwardRef<PlanEditorHandle, PlanEditorProps>(
 
     const hasTitle = streamingTitle.length > 0;
     const hasLines = planLines.length > 0 && !planReady && !isMakingPlan;
-    const cursorOnTitle =
-      isAgentTyping && !hasLines && !isMakingPlan;
+    const cursorOnTitle = isAgentTyping && !hasLines && !isMakingPlan;
 
     return (
       <>
-      <div
-        className={
-          isUpdating
-            ? `${styles.editorWrap} ${styles.isUpdating}`
-            : styles.editorWrap
-        }
-      >
         <div
-          style={{
-            marginLeft: -72,
-            marginRight: -72,
-            padding: "20px 24px",
-            marginBottom: 24,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 10,
-          }}
+          className={
+            isUpdating
+              ? `${styles.editorWrap} ${styles.isUpdating}`
+              : styles.editorWrap
+          }
         >
-          <div
-            aria-live="polite"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 11,
-              color: agentStatus ? "#22c55e" : "#a0a0a0",
-              lineHeight: 1,
-            }}
-          >
-            <span
-              aria-hidden
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: agentStatus ? "#22c55e" : "#c0bfbc",
-                display: "inline-block",
-              }}
-            />
-            <span>
-              {agentStatus ? "Agent 1 is planning" : "Agent 1 listening"}
-            </span>
-            {roleBadge ? (
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 500,
-                  padding: "2px 8px",
-                  borderRadius: 4,
-                  marginLeft: 8,
-                  background: roleBadge.background,
-                  color: roleBadge.color,
-                  lineHeight: 1.4,
-                  fontFamily: "inherit",
-                }}
-              >
-                {roleBadge.label}
-              </span>
-            ) : null}
-          </div>
-
+          {/* Doc header: agent status, role badge, avatars, share */}
           <div
             style={{
+              marginLeft: -72,
+              marginRight: -72,
+              padding: "20px 24px",
+              marginBottom: 24,
               display: "flex",
               alignItems: "center",
+              justifyContent: "space-between",
               gap: 10,
             }}
           >
             <div
+              aria-live="polite"
               style={{
                 display: "flex",
                 alignItems: "center",
-              }}
-            >
-              {others.slice(0, 3).map((o, i) => {
-                const name =
-                  typeof o.info?.name === "string" && o.info.name
-                    ? o.info.name
-                    : "Anonymous";
-                const src =
-                  (typeof o.info?.avatar === "string" && o.info.avatar) ||
-                  `https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(
-                    name
-                  )}`;
-                return (
-                  <img
-                    key={o.connectionId}
-                    src={src}
-                    alt=""
-                    title={name}
-                    referrerPolicy="no-referrer"
-                    style={{
-                      width: 24,
-                      height: 24,
-                      borderRadius: "50%",
-                      border: "2px solid #ffffff",
-                      objectFit: "cover",
-                      display: "inline-block",
-                      marginLeft: i === 0 ? 0 : -8,
-                      zIndex: i + 1,
-                      position: "relative",
-                    }}
-                  />
-                );
-              })}
-              {others.length > 3 ? (
-                <span
-                  title={others
-                    .slice(3)
-                    .map((o) =>
-                      typeof o.info?.name === "string" && o.info.name
-                        ? o.info.name
-                        : "Anonymous"
-                    )
-                    .join(", ")}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: 24,
-                    height: 24,
-                    borderRadius: "50%",
-                    background: "#f5f5f5",
-                    border: "2px solid #ffffff",
-                    marginLeft: -8,
-                    zIndex: 4,
-                    position: "relative",
-                    fontSize: 10,
-                    fontWeight: 500,
-                    color: "#6b6b6b",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  +{others.length - 3}
-                </span>
-              ) : null}
-
-              <img
-                src={
-                  userAvatar ||
-                  `https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(
-                    userName
-                  )}`
-                }
-                alt=""
-                referrerPolicy="no-referrer"
-                title={userName || "You"}
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: "50%",
-                  border: "2px solid #ffffff",
-                  objectFit: "cover",
-                  display: "inline-block",
-                  marginLeft: others.length > 0 ? -8 : 0,
-                  zIndex: others.length + 1,
-                  position: "relative",
-                }}
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={handleShare}
-              style={{
-                fontSize: 12,
-                fontWeight: 500,
-                padding: "5px 14px",
-                borderRadius: 6,
-                border: "none",
-                background: "#2563eb",
-                color: "#ffffff",
-                cursor: "pointer",
-                fontFamily: "inherit",
+                gap: 6,
+                fontSize: 11,
+                color: agentStatus ? "#22c55e" : "#a0a0a0",
                 lineHeight: 1,
               }}
             >
-              {copied ? "Copied!" : "Share"}
-            </button>
-          </div>
-        </div>
-
-        {hasTitle ? (
-          <div className={styles.titleRow}>
-            <span className={styles.titleText}>{streamingTitle}</span>
-            {cursorOnTitle ? (
-              <span className={styles.cursorWrap}>
-                <span className={styles.cursor} aria-hidden />
+              <span
+                aria-hidden
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: agentStatus ? "#22c55e" : "#c0bfbc",
+                  display: "inline-block",
+                }}
+              />
+              <span>
+                {agentStatus ? "Agent 1 is planning" : "Agent 1 listening"}
               </span>
-            ) : null}
-          </div>
-        ) : null}
+              {roleBadge ? (
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 500,
+                    padding: "2px 8px",
+                    borderRadius: 4,
+                    marginLeft: 8,
+                    background: roleBadge.background,
+                    color: roleBadge.color,
+                    lineHeight: 1.4,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {roleBadge.label}
+                </span>
+              ) : null}
+            </div>
 
-        {hasLines ? (
-          <div className={styles.planLines}>
-            {planLines.map((line, index) => (
-              <div key={index} className={styles.planLineRow}>
-                <p className={styles.planLine}>{line}</p>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center" }}>
+                {others.slice(0, 3).map((o, i) => {
+                  const name =
+                    typeof o.info?.name === "string" && o.info.name
+                      ? o.info.name
+                      : "Anonymous";
+                  const src =
+                    (typeof o.info?.avatar === "string" && o.info.avatar) ||
+                    `https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(
+                      name
+                    )}`;
+                  return (
+                    <img
+                      key={o.connectionId}
+                      src={src}
+                      alt=""
+                      title={name}
+                      referrerPolicy="no-referrer"
+                      style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: "50%",
+                        border: "2px solid #ffffff",
+                        objectFit: "cover",
+                        display: "inline-block",
+                        marginLeft: i === 0 ? 0 : -8,
+                        zIndex: i + 1,
+                        position: "relative",
+                      }}
+                    />
+                  );
+                })}
+                {others.length > 3 ? (
+                  <span
+                    title={others
+                      .slice(3)
+                      .map((o) =>
+                        typeof o.info?.name === "string" && o.info.name
+                          ? o.info.name
+                          : "Anonymous"
+                      )
+                      .join(", ")}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 24,
+                      height: 24,
+                      borderRadius: "50%",
+                      background: "#f5f5f5",
+                      border: "2px solid #ffffff",
+                      marginLeft: -8,
+                      zIndex: 4,
+                      position: "relative",
+                      fontSize: 10,
+                      fontWeight: 500,
+                      color: "#6b6b6b",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    +{others.length - 3}
+                  </span>
+                ) : null}
+
+                <img
+                  src={
+                    userAvatar ||
+                    `https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(
+                      userName
+                    )}`
+                  }
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  title={userName || "You"}
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: "50%",
+                    border: "2px solid #ffffff",
+                    objectFit: "cover",
+                    display: "inline-block",
+                    marginLeft: others.length > 0 ? -8 : 0,
+                    zIndex: others.length + 1,
+                    position: "relative",
+                  }}
+                />
               </div>
-            ))}
-          </div>
-        ) : null}
 
-        {renderUpdatingText ? (
-          <div
-            style={{
-              fontSize: 13,
-              color: "#22c55e",
-              marginBottom: 16,
-              opacity: isMakingPlan ? 1 : 0,
-              transition: "opacity 300ms ease",
-            }}
-          >
-            Agent 1 is updating the plan...
+              <button
+                type="button"
+                onClick={handleShare}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 500,
+                  padding: "5px 14px",
+                  borderRadius: 6,
+                  border: "none",
+                  background: "#2563eb",
+                  color: "#ffffff",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  lineHeight: 1,
+                }}
+              >
+                {copied ? "Copied!" : "Share"}
+              </button>
+            </div>
           </div>
-        ) : null}
 
-        {mounted ? <TiptapEditor ref={composedRef} /> : null}
-      </div>
+          {hasTitle ? (
+            <div className={styles.titleRow}>
+              <span className={styles.titleText}>{streamingTitle}</span>
+              {cursorOnTitle ? (
+                <span className={styles.cursorWrap}>
+                  <span className={styles.cursor} aria-hidden />
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          {hasLines ? (
+            <div className={styles.planLines}>
+              {planLines.map((line, index) => (
+                <div key={index} className={styles.planLineRow}>
+                  <p className={styles.planLine}>{line}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {renderUpdatingText ? (
+            <div
+              style={{
+                fontSize: 13,
+                color: "#22c55e",
+                marginBottom: 16,
+                opacity: isMakingPlan ? 1 : 0,
+                transition: "opacity 300ms ease",
+              }}
+            >
+              Agent 1 is updating the plan...
+            </div>
+          ) : null}
+
+          {mounted ? (
+            <TiptapEditor ref={composedRef} othersPresence={othersPresence} />
+          ) : null}
+        </div>
       </>
     );
   }

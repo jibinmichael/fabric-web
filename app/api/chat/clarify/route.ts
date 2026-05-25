@@ -145,6 +145,21 @@ type ChatMessage = {
   content: string | unknown[];
 };
 
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\*(.*?)\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/`(.*?)`/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^[-*+]\s+/gm, "")
+    .replace(/^\d+\.\s+/gm, "")
+    .replace(/^>\s+/gm, "")
+    .replace(/\n{2,}/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function sseLine(payload: Record<string, unknown>): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`);
 }
@@ -237,7 +252,10 @@ export async function POST(request: Request) {
             event.type === "content_block_delta" &&
             event.delta.type === "text_delta"
           ) {
-            controller.enqueue(sseLine({ delta: event.delta.text }));
+            const stripped = stripMarkdown(event.delta.text);
+            if (stripped.length > 0) {
+              controller.enqueue(sseLine({ delta: stripped }));
+            }
           }
         }
 

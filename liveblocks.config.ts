@@ -1,6 +1,11 @@
 declare global {
   interface Liveblocks {
+    Presence: {
+      viewingSection: string | null;
+    };
     Storage: {
+      gapPosted: boolean;
+      ownerId: string;
       docTitle: string;
       planJson: string;
       planLines: string[];

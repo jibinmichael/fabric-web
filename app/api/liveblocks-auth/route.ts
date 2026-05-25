@@ -31,7 +31,7 @@ export async function POST(request: Request) {
   const liveblocks = new Liveblocks({ secret });
 
   const name = providedName;
-  const avatar = `https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(
+  const avatar = `https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(
     name
   )}`;
   const color = colorFromString(name);

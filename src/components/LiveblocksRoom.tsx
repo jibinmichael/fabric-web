@@ -84,13 +84,13 @@ export function LiveblocksRoom({
             ? window.localStorage.getItem("fabric_user_name") || "Anonymous"
             : "Anonymous";
         const selfAvatar =
-          "https://api.dicebear.com/9.x/dylan/svg?seed=" +
+          "https://api.dicebear.com/9.x/pixel-art/svg?seed=" +
           encodeURIComponent(selfName);
         return userIds.map((id) => {
           if (id === "agent-1") {
             return {
               name: "Agent 1",
-              avatar: "https://api.dicebear.com/9.x/bottts/svg?seed=agent1",
+              avatar: "https://api.dicebear.com/9.x/pixel-art/svg?seed=Agent1",
               color: "#22c55e",
             };
           }
@@ -104,9 +104,11 @@ export function LiveblocksRoom({
     >
       <RoomProvider
         id={roomId}
-        initialPresence={{}}
+        initialPresence={{ viewingSection: null }}
         initialStorage={{
+          ownerId: "",
           docTitle: "",
+          gapPosted: false,
           planJson: "",
           planLines: [],
           chatMessages: [],

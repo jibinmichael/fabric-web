@@ -21,9 +21,11 @@ export function SharedDoc({ roomId }: { roomId: string }) {
     <LiveblocksProvider authEndpoint="/api/liveblocks-public">
       <RoomProvider
         id={roomId}
-        initialPresence={{}}
+        initialPresence={{ viewingSection: null }}
         initialStorage={{
+          ownerId: "",
           docTitle: "",
+          gapPosted: false,
           planJson: "",
           planLines: [],
           chatMessages: [],

@@ -4,14 +4,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import {
   useMutation,
+  useOthers,
+  useSelf,
   useStorage,
+  useUpdateMyPresence,
 } from "@liveblocks/react/suspense";
 import { ChatPanel, type ConversationTurn } from "./ChatPanel";
 import chatStyles from "./ChatPanel.module.css";
 import {
   PlanEditor,
+  type OthersPresenceItem,
   type PlanData,
   type PlanEditorHandle,
+  type PlanSectionKey,
 } from "./PlanEditor";
 import { LiveblocksRoom } from "./LiveblocksRoom";
 import { Sidebar } from "./Sidebar";
@@ -215,6 +220,46 @@ function JoinerChat({
         { role: "assistant", content: fullText },
       ]);
       setStreaming("");
+
+      // Best-effort plan patch: if the joiner Q&A revealed new information,
+      // let the agent decide whether to update a plan section.
+      if (fullText && q) {
+        const planSnapshot = planEditorRef.current?.getPlanText() ?? "";
+        const VALID_SECTIONS: PlanSectionKey[] = [
+          "problem",
+          "whoIsAffected",
+          "whatGoodLooksLike",
+          "openQuestions",
+          "nextActions",
+        ];
+        void fetch("/api/plan/patch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationText: `User: ${q}\nAgent: ${fullText}`,
+            currentPlan: planSnapshot,
+          }),
+        })
+          .then(async (res) => {
+            if (!res.ok) return;
+            const data = (await res.json().catch(() => null)) as {
+              shouldUpdate?: boolean;
+              section?: string;
+              newContent?: string;
+            } | null;
+            if (!data?.shouldUpdate) return;
+            const section = VALID_SECTIONS.includes(
+              data.section as PlanSectionKey
+            )
+              ? (data.section as PlanSectionKey)
+              : null;
+            if (!section || !data.newContent) return;
+            planEditorRef.current?.patchSection(section, data.newContent);
+          })
+          .catch(() => {
+            // best-effort, ignore errors
+          });
+      }
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -518,10 +563,70 @@ function DocBody({
   const storedPlanJson = useStorage((root) => root.planJson);
   const storedPlanLines = useStorage((root) => root.planLines);
   const storedChatMessages = useStorage((root) => root.chatMessages);
-  const [isJoiner] = useState<boolean>(
-    () =>
-      !!storedPlanJson && (storedChatMessages?.length ?? 0) > 0
-  );
+  const storedOwnerId = useStorage((root) => root.ownerId);
+  const self = useSelf();
+
+  // ── Thing 2: presence tracking ─────────────────────────────────────────────
+  const updateMyPresence = useUpdateMyPresence();
+  const others = useOthers();
+  const othersPresence: OthersPresenceItem[] = others.map((o) => ({
+    name:
+      typeof o.info?.name === "string" && o.info.name
+        ? o.info.name
+        : "Anonymous",
+    section: o.presence?.viewingSection ?? null,
+    color:
+      typeof o.info?.color === "string" ? o.info.color : "#22c55e",
+  }));
+
+  const editorScrollRef = useRef<HTMLDivElement | null>(null);
+
+  const handleEditorScroll = useCallback(() => {
+    const container = editorScrollRef.current;
+    if (!container) return;
+    const containerRect = container.getBoundingClientRect();
+    const threshold = containerRect.top + containerRect.height / 3;
+    const h2s = Array.from(
+      container.querySelectorAll(".ProseMirror h2")
+    );
+    let viewingSection: string | null = null;
+    for (const h2 of h2s) {
+      const rect = h2.getBoundingClientRect();
+      if (rect.top <= threshold) {
+        viewingSection = (h2.textContent ?? "").trim() || null;
+      }
+    }
+    updateMyPresence({ viewingSection });
+  }, [updateMyPresence]);
+
+  useEffect(() => {
+    const container = editorScrollRef.current;
+    if (!container) return;
+    container.addEventListener("scroll", handleEditorScroll, {
+      passive: true,
+    });
+    return () => container.removeEventListener("scroll", handleEditorScroll);
+  }, [handleEditorScroll]);
+  const selfId = self?.id ?? "";
+
+  const claimOwnership = useMutation(({ storage }, id: string) => {
+    const current = storage.get("ownerId");
+    if (!current) {
+      storage.set("ownerId", id);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selfId) return;
+    if (storedOwnerId) return;
+    claimOwnership(selfId);
+  }, [selfId, storedOwnerId, claimOwnership]);
+
+  const isJoiner =
+    !!storedPlanJson &&
+    (storedChatMessages?.length ?? 0) > 0 &&
+    !!storedOwnerId &&
+    selfId !== storedOwnerId;
 
   const updateDocTitle = useMutation(({ storage }, title: string) => {
     storage.set("docTitle", title);
@@ -868,6 +973,7 @@ function DocBody({
         )}
       </div>
       <div
+        ref={editorScrollRef}
         className="flex-1 overflow-y-auto"
         style={{ padding: "0 24px", background: "#fcfdfe", boxShadow: "-1px 0 4px rgba(0, 0, 0, 0.04)" }}
       >
@@ -899,6 +1005,7 @@ function DocBody({
             agentStatus={isMakingPlan}
             roomId={roomId}
             role={role}
+            othersPresence={othersPresence}
           />
         </div>
       </div>

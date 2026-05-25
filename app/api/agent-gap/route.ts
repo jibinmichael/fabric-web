@@ -1,5 +1,4 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { Liveblocks } from "@liveblocks/node";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -23,7 +22,8 @@ Be specific. Be ruthless. Don't be generic.
 Return ONLY a JSON object:
 {
   "gap": string (the gap as a sharp question under 25 words),
-  "section": string (exactly one of: Problem | Who is affected | What good looks like | Open questions | API gaps | Next)
+  "section": string (exactly one of: Problem | Who is affected | What good looks like | Open questions | API gaps | Next),
+  "nextAction": string (a specific actionable next step to resolve the gap, under 15 words, plain text, no markdown)
 }
 
 Return nothing else. No markdown. Just JSON.`;
@@ -69,16 +69,9 @@ function extractJsonObject(raw: string): string | null {
 
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  const secret = process.env.LIVEBLOCKS_SECRET_KEY;
   if (!apiKey) {
     return Response.json(
       { error: "ANTHROPIC_API_KEY is not configured", gap: null },
-      { status: 500 }
-    );
-  }
-  if (!secret) {
-    return Response.json(
-      { error: "LIVEBLOCKS_SECRET_KEY is not configured", gap: null },
       { status: 500 }
     );
   }
@@ -138,9 +131,13 @@ export async function POST(request: Request) {
     return Response.json({ gap: null });
   }
 
-  let parsed: { gap?: unknown; section?: unknown };
+  let parsed: { gap?: unknown; section?: unknown; nextAction?: unknown };
   try {
-    parsed = JSON.parse(jsonText) as { gap?: unknown; section?: unknown };
+    parsed = JSON.parse(jsonText) as {
+      gap?: unknown;
+      section?: unknown;
+      nextAction?: unknown;
+    };
   } catch {
     return Response.json({ gap: null });
   }
@@ -149,35 +146,15 @@ export async function POST(request: Request) {
     typeof parsed.gap === "string" ? parsed.gap.trim() : "";
   const section =
     typeof parsed.section === "string" ? parsed.section.trim() : "";
+  const nextAction =
+    typeof parsed.nextAction === "string" ? parsed.nextAction.trim() : "";
 
   if (!gap) {
     return Response.json({ gap: null });
   }
 
-  try {
-    const liveblocks = new Liveblocks({ secret });
-    await liveblocks.createThread({
-      roomId,
-      data: {
-        comment: {
-          userId: "agent-1",
-          body: {
-            version: 1,
-            content: [
-              {
-                type: "paragraph",
-                children: [{ text: gap }],
-              },
-            ],
-          },
-        },
-      },
-    });
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Liveblocks createThread failed";
-    return Response.json({ gap, section, error: message }, { status: 502 });
-  }
-
-  return Response.json({ gap, section, posted: true });
+  // Server-side createThread was removed — the client now posts the anchored
+  // comment via the Tiptap Liveblocks extension so the thread is bound to the
+  // section heading instead of floating unanchored.
+  return Response.json({ gap, section, nextAction });
 }

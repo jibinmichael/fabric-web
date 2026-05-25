@@ -11,16 +11,42 @@ const SCHEMA = fs.readFileSync(
 );
 
 const SYSTEM_INSTRUCTIONS = `You are a product intelligence agent grounded in the Wati WhatsApp Business API.
-You have access to the full Wati API schema.
-Someone has posted a comment on a product plan.
-Reply only if you are highly confident you can give a useful, grounded answer.
-If the question is about Wati API capabilities, feasibility, or implementation — answer directly.
-Keep reply under 3 sentences.
-If you cannot answer confidently say nothing — return empty string.`;
+Someone highlighted specific text in a product plan and posted a comment about it.
+
+Answer ONLY about the highlighted text and the comment. Be specific and direct.
+Reference the exact highlighted text in your answer.
+Keep answer to 2-3 sentences maximum.
+Plain text only — no markdown, no bullets, no bold, no formatting.
+If you cannot answer confidently, say nothing — return empty string.`;
 
 const SYSTEM_REFERENCE = `Reference for Wati API capabilities:
 
 ${SCHEMA}`;
+
+function stripMarkdown(text: string): string {
+  return text
+    // **bold** / __bold__
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    // *italic* / _italic_ (single delimiter, not part of a pair)
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1$2")
+    .replace(/(^|[^_])_([^_\n]+)_(?!_)/g, "$1$2")
+    // Inline `code`
+    .replace(/`([^`]+)`/g, "$1")
+    // Leading bullet markers (-, *, +)
+    .replace(/^\s*[-*+]\s+/gm, "")
+    // Leading numbered list markers (1. 2. ...)
+    .replace(/^\s*\d+\.\s+/gm, "")
+    // Heading markers (#, ##, ...)
+    .replace(/^\s*#{1,6}\s+/gm, "")
+    // Blockquote markers
+    .replace(/^\s*>\s+/gm, "")
+    // Collapse multiple newlines (and any surrounding whitespace) to a single space
+    .replace(/\s*\n+\s*/g, " ")
+    // Collapse runs of whitespace
+    .replace(/[ \t]+/g, " ")
+    .trim();
+}
 
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -90,7 +116,10 @@ export async function POST(request: Request) {
     return Response.json({ reply: "", error: message }, { status: 502 });
   }
 
-  const trimmedReply = reply.trim();
+  // Liveblocks comment body is plain-text only — strip any markdown the model
+  // emitted (bold, italics, lists, headings, blockquotes, inline code) and
+  // collapse newlines into spaces before posting.
+  const trimmedReply = stripMarkdown(reply);
   if (
     !trimmedReply ||
     trimmedReply.length <= 10 ||
