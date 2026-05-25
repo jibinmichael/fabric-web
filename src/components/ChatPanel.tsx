@@ -125,6 +125,7 @@ type ChatPanelProps = {
   onAgentResponse?: (text: string, conversation: ConversationTurn[]) => void;
   onPlanReady?: () => void;
   planReady?: boolean;
+  readOnly?: boolean;
 };
 
 export function ChatPanel({
@@ -134,6 +135,7 @@ export function ChatPanel({
   onAgentResponse,
   onPlanReady,
   planReady = false,
+  readOnly = false,
 }: ChatPanelProps = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     (initialMessages ?? [])
@@ -454,6 +456,7 @@ export function ChatPanel({
         </div>
       </div>
 
+      {!readOnly ? (
       <div className={styles.inputRegion}>
         {pendingAttachments.length > 0 ? (
           <div
@@ -580,6 +583,7 @@ export function ChatPanel({
           style={{ display: "none" }}
         />
       </div>
+      ) : null}
     </section>
   );
 }

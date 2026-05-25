@@ -3,6 +3,12 @@
  * cannot live inside a CSS Module that scopes to an ancestor like .editorWrap.
  */
 
+/* Shrink the entire comments composer + thread root. All internal sizes are
+ * relative ems, so dropping the root font-size scales the whole UI down. */
+.lb-root {
+  font-size: 13px !important;
+}
+
 .lb-composer-action[data-variant="primary"] {
   width: 20px !important;
   height: 20px !important;
@@ -12,7 +18,7 @@
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  background: #2563EB !important;
+  background: #2563eb !important;
   color: #ffffff !important;
   line-height: 0 !important;
   font-size: 0 !important;

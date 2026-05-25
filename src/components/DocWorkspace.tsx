@@ -2,8 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import { useMutation, useStorage } from "@liveblocks/react/suspense";
+import {
+  useMutation,
+  useStorage,
+} from "@liveblocks/react/suspense";
 import { ChatPanel, type ConversationTurn } from "./ChatPanel";
+import chatStyles from "./ChatPanel.module.css";
 import {
   PlanEditor,
   type PlanData,
@@ -12,11 +16,423 @@ import {
 import { LiveblocksRoom } from "./LiveblocksRoom";
 import { Sidebar } from "./Sidebar";
 
+type JoinerAttachment =
+  | {
+      kind: "image";
+      base64: string;
+      mediaType: string;
+      name: string;
+      previewUrl: string;
+    }
+  | {
+      kind: "text";
+      name: string;
+      content: string;
+    };
+
+type JoinerApiContentBlock =
+  | { type: "text"; text: string }
+  | {
+      type: "image";
+      source: { type: "base64"; media_type: string; data: string };
+    };
+
+type JoinerMessage = {
+  role: "user" | "assistant";
+  content: string;
+  attachment?: JoinerAttachment;
+};
+
+const JOINER_WELCOME: JoinerMessage = {
+  role: "assistant",
+  content:
+    "The plan is ready. Ask me anything about it — I'll answer from the right perspective automatically.",
+};
+
+function joinerReadAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(typeof r.result === "string" ? r.result : "");
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+}
+
+function joinerReadAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(typeof r.result === "string" ? r.result : "");
+    r.onerror = () => reject(r.error);
+    r.readAsText(file);
+  });
+}
+
+function JoinerChat({
+  planEditorRef,
+}: {
+  planEditorRef: React.RefObject<PlanEditorHandle | null>;
+}) {
+  const [messages, setMessages] = useState<JoinerMessage[]>([JOINER_WELCOME]);
+  const [input, setInput] = useState("");
+  const [streaming, setStreaming] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [pendingAttachment, setPendingAttachment] =
+    useState<JoinerAttachment | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+  }, [messages, streaming]);
+
+  const openFilePicker = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileSelect = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) return;
+      if (file.size > 4 * 1024 * 1024) return;
+      if (file.type.startsWith("image/")) {
+        try {
+          const dataUrl = await joinerReadAsDataURL(file);
+          const base64 = dataUrl.split(",")[1] ?? "";
+          setPendingAttachment({
+            kind: "image",
+            base64,
+            mediaType: file.type || "image/jpeg",
+            name: file.name,
+            previewUrl: dataUrl,
+          });
+        } catch {
+          // skip unreadable file
+        }
+      } else {
+        try {
+          const content = await joinerReadAsText(file);
+          setPendingAttachment({
+            kind: "text",
+            name: file.name,
+            content: content.slice(0, 50000),
+          });
+        } catch {
+          // skip unreadable file
+        }
+      }
+    },
+    []
+  );
+
+  const handleSend = useCallback(async () => {
+    const q = input.trim();
+    if ((!q && !pendingAttachment) || loading) return;
+    const planText = planEditorRef.current?.getPlanText() ?? "";
+    const attachmentToSend = pendingAttachment;
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "user",
+        content: q,
+        attachment: attachmentToSend ?? undefined,
+      },
+    ]);
+    setInput("");
+    setPendingAttachment(null);
+    setStreaming("");
+    setLoading(true);
+
+    let apiContent: string | JoinerApiContentBlock[];
+    if (attachmentToSend?.kind === "image") {
+      const blocks: JoinerApiContentBlock[] = [
+        {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: attachmentToSend.mediaType,
+            data: attachmentToSend.base64,
+          },
+        },
+      ];
+      if (q) {
+        blocks.push({ type: "text", text: q });
+      }
+      apiContent = blocks;
+    } else if (attachmentToSend?.kind === "text") {
+      const prefix = `[Attachment: ${attachmentToSend.name}]\n${attachmentToSend.content}`;
+      apiContent = q ? `${prefix}\n\n${q}` : prefix;
+    } else {
+      apiContent = q;
+    }
+
+    try {
+      const res = await fetch("/api/chat/clarify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: apiContent }],
+          planContext: planText,
+        }),
+      });
+      if (!res.ok) throw new Error("Request failed");
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No stream");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith("data:")) continue;
+            try {
+              const data = JSON.parse(line.slice(5).trim()) as {
+                delta?: string;
+              };
+              if (typeof data.delta === "string") {
+                fullText += data.delta;
+                setStreaming(fullText);
+              }
+            } catch {
+              // skip malformed event
+            }
+          }
+        }
+        if (done) break;
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: fullText },
+      ]);
+      setStreaming("");
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Failed to load" },
+      ]);
+      setStreaming("");
+    } finally {
+      setLoading(false);
+    }
+  }, [input, loading, pendingAttachment, planEditorRef]);
+
+  return (
+    <div className={chatStyles.chatPanel}>
+      <div className={chatStyles.messages} ref={scrollRef}>
+        <div className={chatStyles.messageList}>
+          {messages.map((m, i) =>
+            m.role === "user" ? (
+              <div key={i} className={chatStyles.userMessage}>
+                {m.attachment ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 6,
+                      marginBottom: m.content ? 8 : 0,
+                    }}
+                  >
+                    {m.attachment.kind === "image" ? (
+                      <img
+                        src={m.attachment.previewUrl}
+                        alt={m.attachment.name}
+                        style={{
+                          width: 80,
+                          height: 80,
+                          borderRadius: 6,
+                          objectFit: "cover",
+                          display: "block",
+                        }}
+                      />
+                    ) : (
+                      <span
+                        title={m.attachment.name}
+                        style={{
+                          display: "inline-block",
+                          padding: "4px 8px",
+                          background: "rgba(0,0,0,0.06)",
+                          borderRadius: 6,
+                          fontSize: 12,
+                          color: "#1a1a1a",
+                          maxWidth: 220,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        📎 {m.attachment.name}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
+                {m.content}
+              </div>
+            ) : (
+              <div key={i} className={chatStyles.agentRow}>
+                <span className={chatStyles.agentAvatar} aria-hidden />
+                <div className={chatStyles.assistantMessage}>{m.content}</div>
+              </div>
+            )
+          )}
+          {loading && !streaming ? (
+            <div className={chatStyles.thinkingIndicator}>
+              <span className={chatStyles.thinkingDots}>
+                <span className={chatStyles.thinkingDot}>•</span>
+                <span className={chatStyles.thinkingDot}>•</span>
+                <span className={chatStyles.thinkingDot}>•</span>
+              </span>
+            </div>
+          ) : null}
+          {streaming ? (
+            <div className={chatStyles.agentRow}>
+              <span className={chatStyles.agentAvatar} aria-hidden />
+              <div className={chatStyles.assistantMessage}>{streaming}</div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <div className={chatStyles.inputRegion}>
+        {pendingAttachment ? (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 6,
+              marginBottom: 8,
+            }}
+          >
+            <div
+              style={{
+                position: "relative",
+                display: "inline-flex",
+                alignItems: "center",
+              }}
+            >
+              {pendingAttachment.kind === "image" ? (
+                <img
+                  src={pendingAttachment.previewUrl}
+                  alt={pendingAttachment.name}
+                  style={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: 6,
+                    objectFit: "cover",
+                    display: "block",
+                  }}
+                />
+              ) : (
+                <span
+                  title={pendingAttachment.name}
+                  style={{
+                    display: "inline-block",
+                    padding: "4px 10px",
+                    background: "#f0f0f0",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    color: "#1a1a1a",
+                    maxWidth: 220,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  📎 {pendingAttachment.name}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => setPendingAttachment(null)}
+                aria-label="Remove attachment"
+                style={{
+                  position: "absolute",
+                  top: -6,
+                  right: -6,
+                  width: 18,
+                  height: 18,
+                  borderRadius: 9999,
+                  background: "#1a1a1a",
+                  color: "#ffffff",
+                  border: "none",
+                  fontSize: 11,
+                  lineHeight: 1,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                  fontFamily: "inherit",
+                }}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <div className={chatStyles.inputWrap}>
+          <span className={chatStyles.prompt} aria-hidden>
+            ›
+          </span>
+          <textarea
+            className={chatStyles.textarea}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (input.trim() === "/attach") {
+                  setInput("");
+                  openFilePicker();
+                  return;
+                }
+                void handleSend();
+              }
+            }}
+            placeholder="Ask about this plan..."
+            rows={1}
+            disabled={loading}
+          />
+        </div>
+
+        <div className={chatStyles.footer}>
+          <span className={chatStyles.footerHint}>enter to send</span>
+          <span aria-hidden>·</span>
+          <button
+            type="button"
+            className={chatStyles.footerAction}
+            onClick={openFilePicker}
+          >
+            /attach
+          </button>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          style={{ display: "none" }}
+          accept="image/*,.pdf"
+          onChange={handleFileSelect}
+        />
+      </div>
+    </div>
+  );
+}
+
 type DocWorkspaceProps = {
   userEmail: string;
   userName: string;
   userAvatar: string;
   roomId: string;
+  role?: string;
 };
 
 function splitSentences(text: string): string[] {
@@ -65,29 +481,47 @@ function DocBody({
   userName,
   userAvatar,
   roomId,
+  role,
   sidebarCollapsed,
   onToggleSidebar,
 }: DocWorkspaceProps & {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
 }) {
-  const [copied, setCopied] = useState(false);
-  const handleShare = useCallback(async () => {
-    const url = `${window.location.origin}/doc/shared?room=${encodeURIComponent(
-      roomId
-    )}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      window.prompt("Copy this link:", url);
-    }
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!roomId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/sessions", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as {
+          sessions?: { id: string; roomId: string }[];
+        };
+        const match = Array.isArray(data.sessions)
+          ? data.sessions.find((s) => s.roomId === roomId)
+          : undefined;
+        if (match && !cancelled) {
+          setCurrentSessionId(match.id);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [roomId]);
   const storedDocTitle = useStorage((root) => root.docTitle);
   const storedPlanJson = useStorage((root) => root.planJson);
   const storedPlanLines = useStorage((root) => root.planLines);
   const storedChatMessages = useStorage((root) => root.chatMessages);
+  const [isJoiner] = useState<boolean>(
+    () =>
+      !!storedPlanJson && (storedChatMessages?.length ?? 0) > 0
+  );
 
   const updateDocTitle = useMutation(({ storage }, title: string) => {
     storage.set("docTitle", title);
@@ -107,6 +541,28 @@ function DocBody({
 
   const [planReady, setPlanReady] = useState(Boolean(storedPlanJson));
   const [streamingTitle, setStreamingTitle] = useState(storedDocTitle ?? "");
+  const lastSyncedTitleRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!currentSessionId) return;
+    const title = streamingTitle.trim();
+    if (!title) return;
+    if (lastSyncedTitleRef.current === title) return;
+    const t = setTimeout(() => {
+      lastSyncedTitleRef.current = title;
+      void fetch(
+        `/api/sessions/${encodeURIComponent(currentSessionId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title }),
+        }
+      ).catch(() => {
+        // swallow — title sync is best-effort
+      });
+    }, 500);
+    return () => clearTimeout(t);
+  }, [currentSessionId, streamingTitle]);
   const [isAgentTyping, setIsAgentTyping] = useState(false);
   const [planLines, setPlanLines] = useState<string[]>(
     storedPlanLines ? [...storedPlanLines] : []
@@ -334,29 +790,18 @@ function DocBody({
     handleWritePlan();
   }, [generateTitleFromConversation, handleWritePlan]);
 
-  const initial = (userName || "U").trim().charAt(0).toUpperCase();
 
   return (
-    <>
-      <header
-        style={{
-          height: 44,
-          flexShrink: 0,
-          background: "#FFFFFF",
-          borderBottom: "1px solid #EEEEEE",
-          display: "flex",
-          alignItems: "center",
-          padding: "0 20px",
-          position: "sticky",
-          top: 0,
-          zIndex: 10,
-        }}
-      >
+    <div className="flex h-full bg-[#ffffff]">
+      <div className="w-2/5 bg-[#ffffff] flex flex-col min-h-0">
         <div
           style={{
-            flex: 1,
+            height: 44,
+            flexShrink: 0,
             display: "flex",
             alignItems: "center",
+            padding: "0 20px",
+            background: "#ffffff",
           }}
         >
           <button
@@ -368,7 +813,7 @@ function DocBody({
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             style={{
               padding: 6,
-              color: "#666666",
+              color: "#6b6b6b",
               background: "transparent",
               border: "none",
               borderRadius: 9999,
@@ -378,9 +823,10 @@ function DocBody({
               alignItems: "center",
               justifyContent: "center",
               fontFamily: "inherit",
+              flexShrink: 0,
             }}
             onMouseEnter={(e) =>
-              (e.currentTarget.style.backgroundColor = "#EEEEEE")
+              (e.currentTarget.style.backgroundColor = "#e8e8e6")
             }
             onMouseLeave={(e) =>
               (e.currentTarget.style.backgroundColor = "transparent")
@@ -392,100 +838,25 @@ function DocBody({
               <PanelLeftClose size={14} strokeWidth={1.75} />
             )}
           </button>
-        </div>
-
-
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "flex-end",
-            gap: 10,
-          }}
-        >
-          <div
-            aria-live="polite"
+          <span
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 11,
-              color: isMakingPlan ? "#22c55e" : "#999999",
-              lineHeight: 1,
-            }}
-          >
-            <span
-              aria-hidden
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: isMakingPlan ? "#22c55e" : "#cccccc",
-                display: "inline-block",
-              }}
-            />
-            <span>
-              {isMakingPlan ? "Agent 1 is planning" : "Agent 1 listening"}
-            </span>
-          </div>
-
-          {userAvatar ? (
-            <img
-              src={userAvatar}
-              alt=""
-              referrerPolicy="no-referrer"
-              style={{
-                width: 24,
-                height: 24,
-                borderRadius: "50%",
-                objectFit: "cover",
-                display: "block",
-              }}
-            />
-          ) : (
-            <span
-              aria-hidden
-              style={{
-                width: 24,
-                height: 24,
-                borderRadius: "50%",
-                background: "#e5e5e5",
-                color: "#1a1a1a",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 11,
-                fontWeight: 600,
-              }}
-            >
-              {initial}
-            </span>
-          )}
-
-          <button
-            type="button"
-            onClick={handleShare}
-            style={{
-              fontSize: 12,
+              flex: 1,
+              fontSize: 12.8,
               fontWeight: 500,
-              padding: "4px 12px",
-              borderRadius: 9999,
-              border: "1px solid #EEEEEE",
-              background: "#fff",
-              color: "#666",
-              cursor: "pointer",
-              fontFamily: "inherit",
-              lineHeight: 1,
+              color: "#1a1a1a",
+              opacity: 0.75,
+              marginLeft: 12,
+              overflow: "hidden",
+              whiteSpace: "nowrap",
+              textOverflow: "ellipsis",
             }}
           >
-            {copied ? "Copied!" : "Share"}
-          </button>
+            {storedDocTitle || "New session"}
+          </span>
         </div>
-      </header>
-
-      <div className="flex h-[calc(100vh-44px)] bg-[#F9F9F9]">
-        <div className="w-2/5 bg-white border-r border-[#EEEEEE]">
+        {isJoiner ? (
+          <JoinerChat planEditorRef={planEditorRef} />
+        ) : (
           <ChatPanel
             initialMessages={storedChatMessages ?? []}
             onMessagesChange={updateChatMessages}
@@ -494,38 +865,44 @@ function DocBody({
             onPlanReady={handlePlanReady}
             planReady={planReady}
           />
-        </div>
+        )}
+      </div>
+      <div
+        className="flex-1 overflow-y-auto"
+        style={{ padding: "0 24px", background: "#fcfdfe", boxShadow: "-1px 0 4px rgba(0, 0, 0, 0.04)" }}
+      >
         <div
-          className="flex-1 bg-[#F9F9F9] overflow-y-auto"
-          style={{ padding: "0 24px" }}
+          style={{
+            margin: "40px auto",
+            width: "100%",
+            maxWidth: "800px",
+            minHeight: "calc(100vh - 80px)",
+            height: "auto",
+            border: "1px solid #e8e8e6",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
+            borderRadius: "12px",
+            background: "#ffffff",
+            overflow: "hidden",
+          }}
         >
-          <div
-            style={{
-              margin: "40px auto",
-              width: "100%",
-              maxWidth: "800px",
-              minHeight: "calc(100vh - 80px)",
-              height: "auto",
-              boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
-              borderRadius: "8px",
-              background: "#FFFFFF",
-            }}
-          >
-            <PlanEditor
-              ref={planEditorRef}
-              userEmail={userEmail}
-              userName={userName}
-              userAvatar={userAvatar}
-              streamingTitle={streamingTitle}
-              isAgentTyping={isAgentTyping}
-              planLines={planLines}
-              isMakingPlan={isMakingPlan}
-              isUpdating={isMakingPlan}
-              planReady={planReady}
-            />
-          </div>
+          <PlanEditor
+            ref={planEditorRef}
+            userEmail={userEmail}
+            userName={userName}
+            userAvatar={userAvatar}
+            streamingTitle={streamingTitle}
+            isAgentTyping={isAgentTyping}
+            planLines={planLines}
+            isMakingPlan={isMakingPlan}
+            isUpdating={isMakingPlan}
+            planReady={planReady}
+            agentStatus={isMakingPlan}
+            roomId={roomId}
+            role={role}
+          />
         </div>
       </div>
-    </>
+    </div>
   );
 }
+

@@ -19,19 +19,18 @@ type ContextMenu = {
   sessionId: string;
 };
 
-const SYSTEM_FONT =
-  'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
-
 function formatRelativeTime(ms: number): string {
-  const diff = Date.now() - ms;
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `${d}d ago`;
-  return new Date(ms).toLocaleDateString("en-US", {
+  const now = new Date();
+  const then = new Date(ms);
+  if (now.toDateString() === then.toDateString()) {
+    return "Today";
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (yesterday.toDateString() === then.toDateString()) {
+    return "Yesterday";
+  }
+  return then.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
   });
@@ -40,9 +39,6 @@ function formatRelativeTime(ms: number): string {
 export function Sidebar({
   collapsed,
   currentRoomId,
-  ownerEmail,
-  ownerName,
-  ownerAvatar,
 }: {
   collapsed: boolean;
   currentRoomId: string;
@@ -105,10 +101,10 @@ export function Sidebar({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: "",
-          ownerEmail,
-          ownerName,
-          ownerAvatar,
+          title: "Untitled",
+          ownerEmail: "demo@wati.io",
+          ownerName: "Demo User",
+          ownerAvatar: "",
         }),
       });
       if (!res.ok) return;
@@ -121,7 +117,7 @@ export function Sidebar({
     } finally {
       setCreating(false);
     }
-  }, [creating, ownerEmail, ownerName, ownerAvatar]);
+  }, [creating]);
 
   const startRename = useCallback((s: SessionRecord) => {
     setContextMenu(null);
@@ -187,14 +183,13 @@ export function Sidebar({
         width: collapsed ? 44 : 240,
         height: "100%",
         boxSizing: "border-box",
-        backgroundColor: "#FFFFFF",
-        borderRight: "1px solid #EEEEEE",
-        boxShadow: "1px 0 4px rgba(0, 0, 0, 0.04)",
+        backgroundColor: "#ffffff",
+        borderRight: "0.5px solid #e8e8e6",
         padding: collapsed ? "8px 0" : 12,
         overflow: "hidden",
         transition: "width 200ms ease-out, padding 200ms ease-out",
-        fontFamily: SYSTEM_FONT,
-        color: "#1A1A1A",
+        fontFamily: "inherit",
+        color: "#1a1a1a",
         position: "relative",
         zIndex: 5,
       }}
@@ -218,8 +213,8 @@ export function Sidebar({
             style={{
               width: 22,
               height: 22,
-              color: "#FFFFFF",
-              background: "#2563EB",
+              color: "#ffffff",
+              background: "#2563eb",
               border: "none",
               borderRadius: 9999,
               cursor: creating ? "default" : "pointer",
@@ -228,16 +223,15 @@ export function Sidebar({
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
-              fontFamily: SYSTEM_FONT,
               padding: 0,
               lineHeight: 0,
             }}
             onMouseEnter={(e) => {
               if (!creating)
-                e.currentTarget.style.backgroundColor = "#1D4ED8";
+                e.currentTarget.style.backgroundColor = "#1d4ed8";
             }}
             onMouseLeave={(e) =>
-              (e.currentTarget.style.backgroundColor = "#2563EB")
+              (e.currentTarget.style.backgroundColor = "#2563eb")
             }
           >
             <Plus size={12} strokeWidth={2.25} aria-hidden />
@@ -247,7 +241,6 @@ export function Sidebar({
         <>
           <div
             style={{
-              borderBottom: "1px solid #EEEEEE",
               paddingBottom: 12,
             }}
           >
@@ -258,7 +251,7 @@ export function Sidebar({
               style={{
                 width: "100%",
                 background: "transparent",
-                color: "#2563EB",
+                color: "#2563eb",
                 padding: "8px 12px",
                 fontSize: 13,
                 fontWeight: 500,
@@ -268,14 +261,13 @@ export function Sidebar({
                 cursor: creating ? "default" : "pointer",
                 opacity: creating ? 0.5 : 1,
                 transition: "background-color 150ms ease",
-                fontFamily: SYSTEM_FONT,
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 8,
               }}
               onMouseEnter={(e) => {
                 if (!creating)
-                  e.currentTarget.style.backgroundColor = "#F5F5F5";
+                  e.currentTarget.style.backgroundColor = "#f3f1ee";
               }}
               onMouseLeave={(e) =>
                 (e.currentTarget.style.backgroundColor = "transparent")
@@ -310,16 +302,16 @@ export function Sidebar({
                     minWidth: 0,
                     padding: 4,
                     borderRadius: 6,
-                    backgroundColor: isActive ? "#EEEEEE" : "transparent",
+                    backgroundColor: isActive ? "#f3f3f3" : "transparent",
                     transition: "background-color 120ms ease",
                   }}
                   onMouseEnter={(e) => {
                     if (!isActive)
-                      e.currentTarget.style.backgroundColor = "#F5F5F5";
+                      e.currentTarget.style.backgroundColor = "#f3f1ee";
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.backgroundColor = isActive
-                      ? "#EEEEEE"
+                      ? "#f3f3f3"
                       : "transparent";
                   }}
                 >
@@ -346,13 +338,12 @@ export function Sidebar({
                         height: 28,
                         width: "100%",
                         minWidth: 0,
-                        border: "1px solid #DDDDDD",
+                        border: "1px solid #e8e8e6",
                         borderRadius: 4,
                         padding: "0 8px",
                         fontSize: 13,
-                        fontFamily: SYSTEM_FONT,
-                        color: "#1A1A1A",
-                        background: "#FFFFFF",
+                        color: "#1a1a1a",
+                        background: "#ffffff",
                         outline: "none",
                       }}
                     />
@@ -378,7 +369,7 @@ export function Sidebar({
                           style={{
                             fontSize: 11,
                             fontWeight: 500,
-                            color: "#1A1A1A",
+                            color: "#1a1a1a",
                             whiteSpace: "nowrap",
                             overflow: "hidden",
                             textOverflow: "ellipsis",
@@ -390,7 +381,7 @@ export function Sidebar({
                           style={{
                             fontSize: 11,
                             fontWeight: 400,
-                            color: "#999999",
+                            color: "#a0a0a0",
                             marginTop: 2,
                           }}
                         >
@@ -409,7 +400,7 @@ export function Sidebar({
                           padding: 4,
                           minWidth: 24,
                           minHeight: 24,
-                          color: "#999999",
+                          color: "#a0a0a0",
                           background: "transparent",
                           border: "none",
                           borderRadius: 4,
@@ -417,16 +408,15 @@ export function Sidebar({
                           opacity: isActive ? 1 : 0,
                           transition:
                             "opacity 120ms ease, background-color 120ms ease, color 120ms ease",
-                          fontFamily: SYSTEM_FONT,
                         }}
                         onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = "#EEEEEE";
-                          e.currentTarget.style.color = "#1A1A1A";
+                          e.currentTarget.style.backgroundColor = "#e8e8e6";
+                          e.currentTarget.style.color = "#1a1a1a";
                           e.currentTarget.style.opacity = "1";
                         }}
                         onMouseLeave={(e) => {
                           e.currentTarget.style.backgroundColor = "transparent";
-                          e.currentTarget.style.color = "#999999";
+                          e.currentTarget.style.color = "#a0a0a0";
                           e.currentTarget.style.opacity = isActive ? "1" : "0";
                         }}
                         onClick={(e) => {
@@ -460,13 +450,12 @@ export function Sidebar({
             top: contextMenu.y,
             left: contextMenu.x,
             width: 140,
-            background: "#FFFFFF",
-            border: "1px solid #EEEEEE",
+            background: "#ffffff",
+            border: "1px solid #e8e8e6",
             borderRadius: 6,
             boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
             padding: 4,
             zIndex: 60,
-            fontFamily: SYSTEM_FONT,
           }}
         >
           {(() => {
@@ -483,15 +472,14 @@ export function Sidebar({
                     textAlign: "left",
                     padding: "6px 10px",
                     fontSize: 13,
-                    color: "#1A1A1A",
+                    color: "#1a1a1a",
                     background: "transparent",
                     border: "none",
                     borderRadius: 4,
                     cursor: "pointer",
-                    fontFamily: SYSTEM_FONT,
                   }}
                   onMouseEnter={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#F5F5F5")
+                    (e.currentTarget.style.backgroundColor = "#f3f1ee")
                   }
                   onMouseLeave={(e) =>
                     (e.currentTarget.style.backgroundColor = "transparent")
@@ -513,10 +501,9 @@ export function Sidebar({
                     border: "none",
                     borderRadius: 4,
                     cursor: "pointer",
-                    fontFamily: SYSTEM_FONT,
                   }}
                   onMouseEnter={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#FEF2F2")
+                    (e.currentTarget.style.backgroundColor = "#fef2f2")
                   }
                   onMouseLeave={(e) =>
                     (e.currentTarget.style.backgroundColor = "transparent")

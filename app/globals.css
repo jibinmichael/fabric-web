@@ -3,44 +3,36 @@
 @tailwind utilities;
 
 @font-face {
-  font-family: "Sentinel";
-  src: url("/fonts/Sentinel-Book.otf") format("opentype");
+  font-family: "ABC Monument Grotesk Semi Mono";
+  src: url("/fonts/ABCMonumentGroteskSemiMono-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "ABC Monument Grotesk Semi Mono";
+  src: url("/fonts/ABCMonumentGroteskSemiMono-Regular.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "Sentinel";
-  src: url("/fonts/Sentinel-Medium.otf") format("opentype");
+  font-family: "ABC Monument Grotesk Semi Mono";
+  src: url("/fonts/ABCMonumentGroteskSemiMono-Medium.woff2") format("woff2");
   font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Sentinel";
-  src: url("/fonts/Sentinel-Semibold.otf") format("opentype");
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Sentinel";
-  src: url("/fonts/Sentinel-Bold.otf") format("opentype");
-  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
 
 body {
-  background: #F9F9F9;
+  background: #ffffff;
   padding: 0;
   box-sizing: border-box;
   min-height: 100vh;
-  font-family: "Sentinel", Georgia, "Times New Roman", serif;
-  font-weight: 500;
+  font-family: "ABC Monument Grotesk Semi Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-weight: 400;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

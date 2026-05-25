@@ -1,6 +1,16 @@
 import { Liveblocks } from "@liveblocks/node";
 
-export async function POST() {
+function colorFromString(input: string): string {
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash << 5) - hash + input.charCodeAt(i);
+    hash |= 0;
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 70%, 55%)`;
+}
+
+export async function POST(request: Request) {
   const secret = process.env.LIVEBLOCKS_SECRET_KEY;
   if (!secret) {
     return Response.json(
@@ -9,12 +19,23 @@ export async function POST() {
     );
   }
 
+  const body = (await request
+    .json()
+    .catch(() => ({}))) as { room?: string; name?: string };
+
+  const providedName =
+    typeof body.name === "string" && body.name.trim().length > 0
+      ? body.name.trim()
+      : "Anonymous";
+
   const liveblocks = new Liveblocks({ secret });
 
-  const id = "demo-user";
-  const name = "Demo User";
-  const avatar = "";
-  const color = "#22c55e";
+  const name = providedName;
+  const avatar = `https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(
+    name
+  )}`;
+  const color = colorFromString(name);
+  const id = `user-${name.replace(/\s+/g, "-").toLowerCase()}`;
 
   const liveSession = liveblocks.prepareSession(id, {
     userInfo: { name, avatar, color },
@@ -22,6 +43,6 @@ export async function POST() {
 
   liveSession.allow("fabricv3:*", liveSession.FULL_ACCESS);
 
-  const { status, body } = await liveSession.authorize();
-  return new Response(body, { status });
+  const { status, body: respBody } = await liveSession.authorize();
+  return new Response(respBody, { status });
 }

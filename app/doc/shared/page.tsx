@@ -15,11 +15,11 @@ export default async function SharedDocPage({
         style={{
           padding: 48,
           textAlign: "center",
-          color: "#999",
+          color: "#a0a0a0",
           fontFamily:
-            '"Sentinel", Georgia, "Times New Roman", serif',
+            `"ABC Monument Grotesk Semi Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`,
           fontSize: 14,
-          background: "#FFFFFF",
+          background: "#ffffff",
           minHeight: "100vh",
         }}
       >
@@ -29,7 +29,7 @@ export default async function SharedDocPage({
   }
 
   return (
-    <div style={{ background: "#FFFFFF", minHeight: "100vh" }}>
+    <div style={{ background: "#ffffff", minHeight: "100vh" }}>
       <SharedDoc roomId={roomId} />
     </div>
   );
