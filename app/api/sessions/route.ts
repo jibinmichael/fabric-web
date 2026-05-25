@@ -11,6 +11,7 @@ type SessionRecord = {
   ownerId: string;
   ownerName: string;
   ownerAvatar: string;
+  summary: string;
 };
 
 function sessionsKey(email: string): string {
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
     ownerId: DEMO_EMAIL,
     ownerName,
     ownerAvatar,
+    summary: "",
   };
 
   try {

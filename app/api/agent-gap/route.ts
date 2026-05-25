@@ -93,7 +93,8 @@ export async function POST(request: Request) {
   const anthropic = new Anthropic({
     apiKey,
     defaultHeaders: {
-      "anthropic-beta": "prompt-caching-2024-07-31",
+      "anthropic-beta":
+        "prompt-caching-2024-07-31,interleaved-thinking-2025-05-14",
     },
   });
 
@@ -101,7 +102,9 @@ export async function POST(request: Request) {
   try {
     const response = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 400,
+      max_tokens: 8400,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      thinking: { type: "adaptive", budget_tokens: 8000 } as any,
       system: [
         { type: "text", text: SYSTEM_INSTRUCTIONS },
         {

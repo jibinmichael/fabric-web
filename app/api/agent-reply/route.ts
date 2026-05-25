@@ -17,6 +17,7 @@ Answer ONLY about the highlighted text and the comment. Be specific and direct.
 Reference the exact highlighted text in your answer.
 Keep answer to 2-3 sentences maximum.
 Plain text only — no markdown, no bullets, no bold, no formatting.
+Never use markdown. Think carefully about what is actually being asked before forming a response. Be specific to the highlighted text, not generic.
 If you cannot answer confidently, say nothing — return empty string.`;
 
 const SYSTEM_REFERENCE = `Reference for Wati API capabilities:
@@ -83,7 +84,8 @@ export async function POST(request: Request) {
   const anthropic = new Anthropic({
     apiKey,
     defaultHeaders: {
-      "anthropic-beta": "prompt-caching-2024-07-31",
+      "anthropic-beta":
+        "prompt-caching-2024-07-31,interleaved-thinking-2025-05-14",
     },
   });
 
@@ -91,7 +93,9 @@ export async function POST(request: Request) {
   try {
     const response = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 400,
+      max_tokens: 3400,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      thinking: { type: "adaptive", budget_tokens: 3000 } as any,
       system: [
         { type: "text", text: SYSTEM_INSTRUCTIONS },
         {

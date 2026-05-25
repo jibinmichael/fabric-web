@@ -1,14 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import type { ThreadData } from "@liveblocks/client";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import {
   useMutation,
   useOthers,
   useSelf,
   useStorage,
-  useThreads,
   useUpdateMyPresence,
 } from "@liveblocks/react/suspense";
 import { ChatPanel, type ConversationTurn } from "./ChatPanel";
@@ -21,6 +19,7 @@ import {
   type PlanSectionKey,
 } from "./PlanEditor";
 import { LiveblocksRoom } from "./LiveblocksRoom";
+import { Sidebar } from "./Sidebar";
 
 type JoinerAttachment =
   | {
@@ -497,35 +496,27 @@ function formatConversation(turns: ConversationTurn[]): string {
     .join("\n");
 }
 
-function extractThreadText(thread: ThreadData): string {
-  const comment = thread.comments[0];
-  if (!comment?.body) return "";
-  for (const block of comment.body.content) {
-    const text = block.children
-      .map((c) => ("text" in c ? String(c.text) : ""))
-      .join("")
-      .trim();
-    if (text) return text;
-  }
-  return "";
-}
-
-function formatRelativeTime(date: Date): string {
-  const diff = Date.now() - date.getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
 export function DocWorkspace(props: DocWorkspaceProps) {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const toggleSidebar = () => setSidebarCollapsed((v) => !v);
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-white">
-      <LiveblocksRoom roomId={props.roomId}>
-        <DocBody {...props} />
-      </LiveblocksRoom>
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        currentRoomId={props.roomId}
+        ownerEmail={props.userEmail}
+        ownerName={props.userName}
+        ownerAvatar={props.userAvatar}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <LiveblocksRoom roomId={props.roomId}>
+          <DocBody
+            {...props}
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={toggleSidebar}
+          />
+        </LiveblocksRoom>
+      </div>
     </div>
   );
 }
@@ -536,10 +527,12 @@ function DocBody({
   userAvatar,
   roomId,
   role,
-}: DocWorkspaceProps) {
-  const router = useRouter();
-  const [showThreads, setShowThreads] = useState(false);
-  const { threads } = useThreads();
+  sidebarCollapsed,
+  onToggleSidebar,
+}: DocWorkspaceProps & {
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+}) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -849,6 +842,19 @@ function DocBody({
     try {
       await planEditorRef.current?.typePlan(plan);
       updatePlanJson(JSON.stringify(plan));
+      // best-effort: generate and store a 2-sentence session summary
+      const planTextForSummary =
+        planEditorRef.current?.getPlanText() ?? "";
+      if (planTextForSummary && roomId) {
+        void fetch("/api/sessions/summarize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            planText: planTextForSummary,
+            roomId,
+          }),
+        }).catch(() => {});
+      }
     } catch {
       // typePlan errored; fall through to cleanup
     } finally {
@@ -918,19 +924,23 @@ function DocBody({
         >
           <button
             type="button"
-            onClick={() => router.push("/")}
-            aria-label="Back to home"
+            onClick={onToggleSidebar}
+            aria-label={
+              sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+            }
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             style={{
-              padding: "4px 8px",
+              padding: 6,
               color: "#6b6b6b",
               background: "transparent",
               border: "none",
-              borderRadius: 6,
+              borderRadius: 9999,
               cursor: "pointer",
-              fontSize: 14,
-              fontFamily: "inherit",
+              transition: "background-color 150ms ease",
               display: "inline-flex",
               alignItems: "center",
+              justifyContent: "center",
+              fontFamily: "inherit",
               flexShrink: 0,
             }}
             onMouseEnter={(e) =>
@@ -940,7 +950,11 @@ function DocBody({
               (e.currentTarget.style.backgroundColor = "transparent")
             }
           >
-            ←
+            {sidebarCollapsed ? (
+              <PanelLeftOpen size={14} strokeWidth={1.75} />
+            ) : (
+              <PanelLeftClose size={14} strokeWidth={1.75} />
+            )}
           </button>
           <span
             style={{
@@ -957,30 +971,6 @@ function DocBody({
           >
             {storedDocTitle || "New session"}
           </span>
-          <button
-            type="button"
-            onClick={() => setShowThreads((v) => !v)}
-            style={{
-              padding: "4px 10px",
-              color: showThreads ? "#1a1a1a" : "#6b6b6b",
-              background: showThreads ? "#f0f0f0" : "transparent",
-              border: "none",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontSize: 12,
-              fontWeight: 500,
-              fontFamily: "inherit",
-              flexShrink: 0,
-            }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.backgroundColor = showThreads ? "#e8e8e6" : "#f5f5f5")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.backgroundColor = showThreads ? "#f0f0f0" : "transparent")
-            }
-          >
-            Threads
-          </button>
         </div>
         {isJoiner ? (
           <JoinerChat planEditorRef={planEditorRef} />
@@ -998,12 +988,7 @@ function DocBody({
       <div
         ref={editorScrollRef}
         className="flex-1 overflow-y-auto"
-        style={{
-          position: "relative",
-          padding: "0 24px",
-          background: "#fcfdfe",
-          boxShadow: "-1px 0 4px rgba(0, 0, 0, 0.04)",
-        }}
+        style={{ padding: "0 24px", background: "#fcfdfe", boxShadow: "-1px 0 4px rgba(0, 0, 0, 0.04)" }}
       >
         <div
           style={{
@@ -1036,178 +1021,6 @@ function DocBody({
             othersPresence={othersPresence}
           />
         </div>
-
-        {/* Threads slide panel */}
-        {showThreads && (
-          <div
-            style={{
-              position: "absolute",
-              right: 0,
-              top: 0,
-              bottom: 0,
-              width: 240,
-              background: "#ffffff",
-              borderLeft: "1px solid #e8e8e6",
-              display: "flex",
-              flexDirection: "column",
-              zIndex: 10,
-            }}
-          >
-            {/* Panel header */}
-            <div
-              style={{
-                height: 44,
-                flexShrink: 0,
-                display: "flex",
-                alignItems: "center",
-                padding: "0 16px",
-                borderBottom: "1px solid #f0f0f0",
-              }}
-            >
-              <span
-                style={{
-                  flex: 1,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "#1a1a1a",
-                  letterSpacing: "0.02em",
-                  textTransform: "uppercase",
-                }}
-              >
-                Threads
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowThreads(false)}
-                aria-label="Close threads"
-                style={{
-                  padding: 4,
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  fontSize: 16,
-                  color: "#6b6b6b",
-                  lineHeight: 1,
-                  borderRadius: 4,
-                  fontFamily: "inherit",
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.backgroundColor = "#f0f0f0")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.backgroundColor = "transparent")
-                }
-              >
-                ×
-              </button>
-            </div>
-
-            {/* Thread list */}
-            <div style={{ flex: 1, overflowY: "auto" }}>
-              {threads.length === 0 ? (
-                <div
-                  style={{
-                    padding: "32px 16px",
-                    textAlign: "center",
-                    fontSize: 12,
-                    color: "#a0a0a0",
-                  }}
-                >
-                  No threads yet
-                </div>
-              ) : (
-                threads.map((thread) => {
-                  const firstComment = thread.comments[0];
-                  const userId = firstComment?.userId ?? "";
-                  const avatarSrc = `https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(userId)}`;
-                  const commentText = extractThreadText(thread);
-                  const createdAt =
-                    firstComment?.createdAt instanceof Date
-                      ? firstComment.createdAt
-                      : new Date(firstComment?.createdAt ?? Date.now());
-                  const timeLabel = formatRelativeTime(createdAt);
-
-                  return (
-                    <div
-                      key={thread.id}
-                      style={{
-                        padding: "12px 16px",
-                        borderBottom: "1px solid #f5f5f5",
-                        cursor: "default",
-                      }}
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.background = "#fafafa")
-                      }
-                      onMouseLeave={(e) =>
-                        (e.currentTarget.style.background = "transparent")
-                      }
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          marginBottom: 6,
-                        }}
-                      >
-                        <img
-                          src={avatarSrc}
-                          alt=""
-                          referrerPolicy="no-referrer"
-                          style={{
-                            width: 16,
-                            height: 16,
-                            borderRadius: "50%",
-                            flexShrink: 0,
-                            display: "block",
-                          }}
-                        />
-                        <span
-                          style={{
-                            flex: 1,
-                            fontSize: 11,
-                            fontWeight: 500,
-                            color: "#1a1a1a",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {userId}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 10,
-                            color: "#a0a0a0",
-                            flexShrink: 0,
-                          }}
-                        >
-                          {timeLabel}
-                        </span>
-                      </div>
-                      {commentText && (
-                        <p
-                          style={{
-                            margin: 0,
-                            fontSize: 11,
-                            color: "#4a4a4a",
-                            lineHeight: 1.5,
-                            display: "-webkit-box",
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: "vertical",
-                            overflow: "hidden",
-                          }}
-                        >
-                          {commentText}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

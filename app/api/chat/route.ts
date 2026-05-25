@@ -5,6 +5,7 @@ import type {
 } from "@anthropic-ai/sdk/resources/messages";
 import fs from "node:fs";
 import path from "node:path";
+import { kv } from "@vercel/kv";
 
 const MODEL = "claude-sonnet-4-6";
 
@@ -166,34 +167,79 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = (await request.json()) as { messages?: ChatMessage[] };
+  const body = (await request.json()) as {
+    messages?: ChatMessage[];
+    currentRoomId?: string;
+  };
   const messages = body.messages ?? [];
+  const currentRoomId =
+    typeof body.currentRoomId === "string" ? body.currentRoomId.trim() : "";
 
   if (!messages.length) {
     return Response.json({ error: "messages are required" }, { status: 400 });
   }
 
+  // ── Past decisions context (Thing 4) ────────────────────────────────────────
+  type PastSession = { title?: string; roomId?: string; summary?: string };
+  let pastDecisions = "";
+  try {
+    const stored = await kv.get<PastSession[]>("sessions:demo@wati.io");
+    if (Array.isArray(stored)) {
+      const relevant = stored.filter(
+        (s) =>
+          typeof s.summary === "string" &&
+          s.summary.trim().length > 0 &&
+          (!currentRoomId || s.roomId !== currentRoomId)
+      );
+      if (relevant.length > 0) {
+        const top3 = relevant.slice(0, 3);
+        pastDecisions =
+          "Past planning decisions at Wati:\n" +
+          top3
+            .map((s) => `- ${s.title ?? "Untitled"}: ${s.summary ?? ""}`)
+            .join("\n");
+      }
+    }
+  } catch {
+    // best-effort — never block the main request
+  }
+
   const client = new Anthropic({
     apiKey,
     defaultHeaders: {
-      "anthropic-beta": "prompt-caching-2024-07-31",
+      "anthropic-beta":
+        "prompt-caching-2024-07-31,interleaved-thinking-2025-05-14",
     },
   });
 
   const readable = new ReadableStream({
     async start(controller) {
       try {
+        type SystemBlock = {
+          type: "text";
+          text: string;
+          cache_control?: { type: "ephemeral" };
+        };
+        const systemBlocks: SystemBlock[] = [
+          { type: "text", text: SYSTEM_INSTRUCTIONS },
+        ];
+        if (pastDecisions) {
+          systemBlocks.push({
+            type: "text",
+            text: pastDecisions,
+            cache_control: { type: "ephemeral" },
+          });
+        }
+        systemBlocks.push({
+          type: "text",
+          text: SYSTEM_REFERENCE,
+          cache_control: { type: "ephemeral" },
+        });
+
         const stream = client.messages.stream({
           model: MODEL,
           max_tokens: 4000,
-          system: [
-            { type: "text", text: SYSTEM_INSTRUCTIONS },
-            {
-              type: "text",
-              text: SYSTEM_REFERENCE,
-              cache_control: { type: "ephemeral" },
-            },
-          ],
+          system: systemBlocks,
           tools: TOOLS,
           tool_choice: { type: "any" },
           messages: messages as MessageParam[],

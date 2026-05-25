@@ -106,26 +106,32 @@ function getWatiSchemaText(): string {
   return cachedWatiSchema;
 }
 
+const THINKING_ADDENDUM = `Never use bullet points, bold, markdown formatting, or numbered lists. Write in plain conversational prose. Be thought-provoking — ask yourself what assumption this question is making before answering. Answer like a smart colleague talking through a problem, not like an AI generating a response.`;
+
 const DEFAULT_PROMPT = `You are a sharp product thinking partner for Wati teams. Answer questions about this product plan concisely and clearly.
-Ground your answers in the Wati WhatsApp Business API schema provided.`;
+Ground your answers in the Wati WhatsApp Business API schema provided.
+${THINKING_ADDENDUM}`;
 
 const ENGINEERING_PROMPT = `You are a senior engineering lead at Wati reviewing a product plan.
 Answer questions about technical feasibility, implementation effort, API availability, and technical risks.
 Be specific about which exact Wati API endpoints can support this feature.
 Flag what needs custom development beyond existing APIs.
 Reference the Wati schema provided.
-Keep answers under 4 sentences. Be direct.`;
+Keep answers under 4 sentences. Be direct.
+${THINKING_ADDENDUM}`;
 
 const QA_PROMPT = `You are a QA lead at Wati reviewing a product plan.
 Answer questions about edge cases, acceptance criteria, what could go wrong, and how to test this feature.
 Think about failure modes, API rate limits, and user error scenarios in WhatsApp context.
 Reference the Wati schema where relevant.
-Keep answers under 4 sentences. Be direct.`;
+Keep answers under 4 sentences. Be direct.
+${THINKING_ADDENDUM}`;
 
 const DESIGN_PROMPT = `You are a product designer at Wati reviewing a product plan.
 Answer questions about user flows, UI patterns, and how this fits into the Wati WhatsApp interface.
 Reference existing Wati UI patterns and WhatsApp constraints.
-Keep answers under 4 sentences. Be direct.`;
+Keep answers under 4 sentences. Be direct.
+${THINKING_ADDENDUM}`;
 
 function promptForRole(role: string | undefined): string {
   switch (role) {
@@ -209,10 +215,8 @@ export async function POST(request: Request) {
           {
             model: MODEL,
             max_tokens: 4000,
-            thinking: {
-              type: "enabled",
-              budget_tokens: 3000,
-            },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            thinking: { type: "adaptive", budget_tokens: 5000 } as any,
             system: planContext
               ? [
                   {
@@ -242,7 +246,8 @@ export async function POST(request: Request) {
           },
           {
             headers: {
-              "anthropic-beta": "prompt-caching-2024-07-31",
+              "anthropic-beta":
+                "prompt-caching-2024-07-31,interleaved-thinking-2025-05-14",
             },
           }
         );
