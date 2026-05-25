@@ -17,7 +17,7 @@ export default async function SharedDocPage({
           textAlign: "center",
           color: "#a0a0a0",
           fontFamily:
-            `"ABC Monument Grotesk Semi Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`,
+            `-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`,
           fontSize: 14,
           background: "#ffffff",
           minHeight: "100vh",

@@ -47,7 +47,7 @@ function Fallback() {
         padding: 48,
         textAlign: "center",
         color: "#a0a0a0",
-        fontFamily: `"ABC Monument Grotesk Semi Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`,
+        fontFamily: `-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`,
         fontSize: 13,
       }}
     >
@@ -79,7 +79,7 @@ function SharedDocBody() {
             fontWeight: 700,
             color: "#1a1a1a",
             marginBottom: 32,
-            fontFamily: `"ABC Monument Grotesk Semi Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`,
+            fontFamily: `-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`,
           }}
         >
           {docTitle}

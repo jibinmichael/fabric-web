@@ -13,7 +13,11 @@ export async function POST() {
   const id = `viewer-${Math.random().toString(36).slice(2, 10)}`;
 
   const session = liveblocks.prepareSession(id, {
-    userInfo: { name: "Viewer", avatar: "", color: "#999999" },
+    userInfo: {
+      name: "Viewer",
+      avatar: `https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(id)}`,
+      color: "#999999",
+    },
   });
 
   session.allow("fabricv3:*", session.READ_ACCESS);

@@ -6,9 +6,9 @@ export async function POST(request: Request) {
     .catch(() => ({}))) as { userIds?: string[] };
   const userIds = Array.isArray(body.userIds) ? body.userIds : [];
 
-  const users: UserInfo[] = userIds.map(() => ({
+  const users: UserInfo[] = userIds.map((id) => ({
     name: "Demo User",
-    avatar: undefined,
+    avatar: `https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(id)}`,
     color: "#22c55e",
   }));
 

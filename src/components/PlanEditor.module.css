@@ -7,7 +7,7 @@
   min-height: 100%;
   max-height: 100%;
   overflow: visible;
-  font-family: "ABC Monument Grotesk Semi Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   font-weight: 400;
 }
 
@@ -19,7 +19,7 @@
   color: #1a1a1a;
   line-height: 1.2;
   margin-bottom: 16px;
-  font-family: "ABC Monument Grotesk Semi Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
 
 .titleText {
@@ -43,7 +43,7 @@
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 3px;
-  font-family: "ABC Monument Grotesk Semi Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   font-weight: 400;
   line-height: 1;
   white-space: nowrap;
@@ -68,7 +68,7 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 24px;
-  font-family: "ABC Monument Grotesk Semi Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
 
 .userAvatar {
@@ -116,7 +116,7 @@
 }
 
 .placeholderFlow {
-  font-family: "ABC Monument Grotesk Semi Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   font-size: 13px;
   line-height: 1.6;
   color: #c0bfbc;
@@ -131,7 +131,7 @@
 }
 
 .planLine {
-  font-family: "ABC Monument Grotesk Semi Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   font-size: 14.2px;
   line-height: 1.7;
   color: #1a1a1a;
