@@ -79,32 +79,40 @@ export function LiveblocksRoom({
         return await res.json();
       }}
       resolveUsers={async ({ userIds }) => {
-        const selfName =
-          typeof window !== "undefined"
-            ? window.localStorage.getItem("fabric_user_name") || "Anonymous"
-            : "Anonymous";
-        const selfAvatar =
-          "https://api.dicebear.com/9.x/pixel-art/svg?seed=" +
-          encodeURIComponent(selfName);
-        return userIds.map((id) => {
-          if (id === "agent-1") {
+        return userIds.map((userId) => {
+          if (userId === "agent-1") {
             return {
               name: "Agent 1",
-              avatar: "https://api.dicebear.com/9.x/pixel-art/svg?seed=Agent1",
+              avatar: "https://api.dicebear.com/9.x/thumbs/svg?seed=Agent1",
               color: "#22c55e",
             };
+          } else if (userId === "fabric") {
+            return {
+              name: "fabric",
+              avatar:
+                "https://api.dicebear.com/9.x/pixel-art/svg?seed=fabric",
+              color: "#2563eb",
+            };
+          } else if (userId === "challenger-1") {
+            return {
+              name: "Challenger",
+              avatar:
+                "https://api.dicebear.com/9.x/pixel-art/svg?seed=Challenger1",
+              color: "#ef4444",
+            };
+          } else {
+            return {
+              name: userId.slice(0, 12),
+              avatar: `https://api.dicebear.com/9.x/thumbs/svg?seed=${encodeURIComponent(userId)}`,
+              color: "#6b7280",
+            };
           }
-          return {
-            name: selfName,
-            avatar: selfAvatar,
-            color: "#22c55e",
-          };
         });
       }}
     >
       <RoomProvider
         id={roomId}
-        initialPresence={{ viewingSection: null }}
+        initialPresence={{ viewingSection: null, cursor: null }}
         initialStorage={{
           ownerId: "",
           docTitle: "",
@@ -112,7 +120,7 @@ export function LiveblocksRoom({
           planJson: "",
           planLines: [],
           chatMessages: [],
-          roomChat: [],
+          challengedThreadIds: [],
         }}
       >
         <ClientSideSuspense fallback={null}>{children}</ClientSideSuspense>

@@ -31,11 +31,11 @@ export async function POST(request: Request) {
   const liveblocks = new Liveblocks({ secret });
 
   const name = providedName;
-  const avatar = `https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(
+  const avatar = `https://api.dicebear.com/9.x/thumbs/svg?seed=${encodeURIComponent(
     name
   )}`;
   const color = colorFromString(name);
-  const id = `user-${name.replace(/\s+/g, "-").toLowerCase()}`;
+  const id = "demo-" + name.toLowerCase().replace(/\s+/g, "-");
 
   const liveSession = liveblocks.prepareSession(id, {
     userInfo: { name, avatar, color },

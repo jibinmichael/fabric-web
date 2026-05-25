@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Check, Plus, Search } from "lucide-react";
 import {
   useMutation,
   useOthers,
@@ -9,6 +9,7 @@ import {
   useStorage,
   useUpdateMyPresence,
 } from "@liveblocks/react/suspense";
+import { Cursors } from "@liveblocks/react-ui";
 import { ChatPanel, type ConversationTurn } from "./ChatPanel";
 import chatStyles from "./ChatPanel.module.css";
 import {
@@ -19,7 +20,6 @@ import {
   type PlanSectionKey,
 } from "./PlanEditor";
 import { LiveblocksRoom } from "./LiveblocksRoom";
-import { Sidebar } from "./Sidebar";
 
 type JoinerAttachment =
   | {
@@ -81,6 +81,7 @@ function JoinerChat({
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState("");
   const [loading, setLoading] = useState(false);
+  const [planUpdated, setPlanUpdated] = useState(false);
   const [pendingAttachment, setPendingAttachment] =
     useState<JoinerAttachment | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -222,7 +223,7 @@ function JoinerChat({
       setStreaming("");
 
       // Best-effort plan patch: if the joiner Q&A revealed new information,
-      // let the agent decide whether to update a plan section.
+      // let the agent decide whether to update one or more plan sections.
       if (fullText && q) {
         const planSnapshot = planEditorRef.current?.getPlanText() ?? "";
         const VALID_SECTIONS: PlanSectionKey[] = [
@@ -230,6 +231,7 @@ function JoinerChat({
           "whoIsAffected",
           "whatGoodLooksLike",
           "openQuestions",
+          "apiGaps",
           "nextActions",
         ];
         void fetch("/api/plan/patch", {
@@ -244,17 +246,27 @@ function JoinerChat({
             if (!res.ok) return;
             const data = (await res.json().catch(() => null)) as {
               shouldUpdate?: boolean;
-              section?: string;
-              newContent?: string;
+              updates?: { section?: string; newContent?: string }[];
             } | null;
-            if (!data?.shouldUpdate) return;
-            const section = VALID_SECTIONS.includes(
-              data.section as PlanSectionKey
-            )
-              ? (data.section as PlanSectionKey)
-              : null;
-            if (!section || !data.newContent) return;
-            planEditorRef.current?.patchSection(section, data.newContent);
+            if (!data?.shouldUpdate || !data.updates?.length) return;
+            let appliedAny = false;
+            for (const update of data.updates) {
+              if (!update.section || !update.newContent) continue;
+              if (
+                !VALID_SECTIONS.includes(update.section as PlanSectionKey)
+              ) {
+                continue;
+              }
+              planEditorRef.current?.patchSection(
+                update.section as PlanSectionKey,
+                update.newContent
+              );
+              appliedAny = true;
+            }
+            if (appliedAny) {
+              setPlanUpdated(true);
+              setTimeout(() => setPlanUpdated(false), 2000);
+            }
           })
           .catch(() => {
             // best-effort, ignore errors
@@ -272,7 +284,28 @@ function JoinerChat({
   }, [input, loading, pendingAttachment, planEditorRef]);
 
   return (
-    <div className={chatStyles.chatPanel}>
+    <div className={chatStyles.chatPanel} style={{ position: "relative" }}>
+      {planUpdated ? (
+        <div
+          style={{
+            position: "absolute",
+            top: 8,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "rgba(0,0,0,0.85)",
+            color: "#ffffff",
+            fontSize: 12,
+            fontWeight: 500,
+            padding: "5px 10px",
+            borderRadius: 6,
+            zIndex: 10,
+            pointerEvents: "none",
+            fontFamily: "inherit",
+          }}
+        >
+          ✦ Plan updated
+        </div>
+      ) : null}
       <div className={chatStyles.messages} ref={scrollRef}>
         <div className={chatStyles.messageList}>
           {messages.map((m, i) =>
@@ -497,24 +530,11 @@ function formatConversation(turns: ConversationTurn[]): string {
 }
 
 export function DocWorkspace(props: DocWorkspaceProps) {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const toggleSidebar = () => setSidebarCollapsed((v) => !v);
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-white">
-      <Sidebar
-        collapsed={sidebarCollapsed}
-        currentRoomId={props.roomId}
-        ownerEmail={props.userEmail}
-        ownerName={props.userName}
-        ownerAvatar={props.userAvatar}
-      />
       <div className="flex min-w-0 flex-1 flex-col">
         <LiveblocksRoom roomId={props.roomId}>
-          <DocBody
-            {...props}
-            sidebarCollapsed={sidebarCollapsed}
-            onToggleSidebar={toggleSidebar}
-          />
+          <DocBody {...props} />
         </LiveblocksRoom>
       </div>
     </div>
@@ -527,12 +547,7 @@ function DocBody({
   userAvatar,
   roomId,
   role,
-  sidebarCollapsed,
-  onToggleSidebar,
-}: DocWorkspaceProps & {
-  sidebarCollapsed: boolean;
-  onToggleSidebar: () => void;
-}) {
+}: DocWorkspaceProps) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -565,6 +580,34 @@ function DocBody({
   const storedChatMessages = useStorage((root) => root.chatMessages);
   const storedOwnerId = useStorage((root) => root.ownerId);
   const self = useSelf();
+
+  // ── Search command palette ─────────────────────────────────────────────────
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [searchSessions, setSearchSessions] = useState<any[]>([]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setShowSearch(true);
+      }
+      if (e.key === "Escape") setShowSearch(false);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  useEffect(() => {
+    if (!showSearch) return;
+    fetch("/api/sessions")
+      .then((r) => r.json())
+      .then((d) => setSearchSessions(d.sessions ?? []))
+      .catch(() => {});
+    setTimeout(() => searchInputRef.current?.focus(), 50);
+  }, [showSearch]);
 
   // ── Thing 2: presence tracking ─────────────────────────────────────────────
   const updateMyPresence = useUpdateMyPresence();
@@ -706,6 +749,20 @@ function DocBody({
     }
     updatePlanLines(planLines);
   }, [planLines, updatePlanLines]);
+
+  const writingBulletInitRef = useRef(true);
+  useEffect(() => {
+    if (writingBulletInitRef.current) {
+      writingBulletInitRef.current = false;
+      return;
+    }
+    if (planLines.length === 0) return;
+    updateMyPresence({ viewingSection: "writing-bullet" });
+    const t = setTimeout(() => {
+      updateMyPresence({ viewingSection: null });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [planLines, updateMyPresence]);
 
   const enqueueAnimation = useCallback((task: () => Promise<void>) => {
     pendingTasksRef.current += 1;
@@ -908,120 +965,314 @@ function DocBody({
     handleWritePlan();
   }, [generateTitleFromConversation, handleWritePlan]);
 
+  const handleShare = useCallback(async () => {
+    if (!roomId || typeof window === "undefined") return;
+    const url = `${window.location.origin}/doc?room=${encodeURIComponent(
+      roomId
+    )}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      window.prompt("Copy this link:", url);
+    }
+  }, [roomId]);
 
   return (
-    <div className="flex h-full bg-[#ffffff]">
-      <div className="w-2/5 bg-[#ffffff] flex flex-col min-h-0">
-        <div
-          style={{
-            height: 44,
-            flexShrink: 0,
-            display: "flex",
-            alignItems: "center",
-            padding: "0 20px",
-            background: "#ffffff",
-          }}
-        >
-          <button
-            type="button"
-            onClick={onToggleSidebar}
-            aria-label={
-              sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
-            }
-            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+    <div
+      className="flex h-full flex-col bg-[#ffffff]"
+      onPointerMove={(e) =>
+        updateMyPresence({ cursor: { x: e.clientX, y: e.clientY } })
+      }
+      onPointerLeave={() => updateMyPresence({ cursor: null })}
+    >
+      <Cursors />
+      <div className="flex flex-1 min-h-0 bg-[#ffffff]">
+        <div className="w-2/5 bg-[#ffffff] flex flex-col min-h-0">
+          <div
             style={{
-              padding: 6,
-              color: "#6b6b6b",
-              background: "transparent",
-              border: "none",
-              borderRadius: 9999,
-              cursor: "pointer",
-              transition: "background-color 150ms ease",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontFamily: "inherit",
               flexShrink: 0,
-            }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.backgroundColor = "#e8e8e6")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.backgroundColor = "transparent")
-            }
-          >
-            {sidebarCollapsed ? (
-              <PanelLeftOpen size={14} strokeWidth={1.75} />
-            ) : (
-              <PanelLeftClose size={14} strokeWidth={1.75} />
-            )}
-          </button>
-          <span
-            style={{
-              flex: 1,
-              fontSize: 12.8,
-              fontWeight: 500,
-              color: "#1a1a1a",
-              opacity: 0.75,
-              marginLeft: 12,
-              overflow: "hidden",
-              whiteSpace: "nowrap",
-              textOverflow: "ellipsis",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-end",
+              padding: "0 12px",
+              gap: 8,
+              height: 44,
             }}
           >
-            {storedDocTitle || "New session"}
-          </span>
+            <span
+              style={{
+                fontSize: 11.8,
+                fontWeight: 600,
+                color: "#1A1A1A",
+                opacity: 0.7,
+                letterSpacing: "-0.15px",
+                whiteSpace: "nowrap",
+                marginRight: "auto",
+              }}
+            >
+              {streamingTitle || "Untitled"}
+            </span>
+            <button
+              type="button"
+              aria-label="New doc"
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: "50%",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+              onClick={() => (window.location.href = "/doc")}
+              onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.8")}
+              onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+            >
+              <Plus size={16} color="#9DA3AE" strokeWidth={2} />
+            </button>
+
+            <button
+              type="button"
+              aria-label="Search"
+              onClick={() => setShowSearch(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "3px 7px",
+                borderRadius: 6,
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                color: "#9DA3AE",
+                fontFamily: "inherit",
+              }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.04)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.backgroundColor = "transparent")
+              }
+            >
+              <Search size={13} strokeWidth={1.8} />
+              <span
+                style={{
+                  fontSize: 10,
+                  color: "#B0B7C3",
+                  background: "rgba(0,0,0,0.05)",
+                  borderRadius: 4,
+                  padding: "1px 5px",
+                }}
+              >
+                ⌘K
+              </span>
+            </button>
+          </div>
+          {isJoiner ? (
+            <JoinerChat planEditorRef={planEditorRef} />
+          ) : (
+            <ChatPanel
+              initialMessages={storedChatMessages ?? []}
+              onMessagesChange={updateChatMessages}
+              onFirstMessage={handleFirstMessage}
+              onAgentResponse={handleAgentResponse}
+              onPlanReady={handlePlanReady}
+              planReady={planReady}
+            />
+          )}
         </div>
-        {isJoiner ? (
-          <JoinerChat planEditorRef={planEditorRef} />
-        ) : (
-          <ChatPanel
-            initialMessages={storedChatMessages ?? []}
-            onMessagesChange={updateChatMessages}
-            onFirstMessage={handleFirstMessage}
-            onAgentResponse={handleAgentResponse}
-            onPlanReady={handlePlanReady}
-            planReady={planReady}
-          />
-        )}
-      </div>
-      <div
-        ref={editorScrollRef}
-        className="flex-1 overflow-y-auto"
-        style={{ padding: "0 24px", background: "#fcfdfe", boxShadow: "-1px 0 4px rgba(0, 0, 0, 0.04)" }}
-      >
         <div
+          ref={editorScrollRef}
+          className="flex-1 overflow-y-auto"
           style={{
-            margin: "40px auto",
-            width: "100%",
-            maxWidth: "800px",
-            minHeight: "calc(100vh - 80px)",
-            height: "auto",
-            border: "1px solid #e8e8e6",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
-            borderRadius: "12px",
-            background: "#ffffff",
-            overflow: "hidden",
+            padding: "0 24px",
+            background: "#F6F5F4",
           }}
         >
-          <PlanEditor
-            ref={planEditorRef}
-            userEmail={userEmail}
-            userName={userName}
-            userAvatar={userAvatar}
-            streamingTitle={streamingTitle}
-            isAgentTyping={isAgentTyping}
-            planLines={planLines}
-            isMakingPlan={isMakingPlan}
-            isUpdating={isMakingPlan}
-            planReady={planReady}
-            agentStatus={isMakingPlan}
-            roomId={roomId}
-            role={role}
-            othersPresence={othersPresence}
-          />
+          <div
+            style={{
+              margin: "40px auto",
+              width: "100%",
+              maxWidth: "800px",
+              minHeight: "calc(100vh - 80px)",
+              height: "auto",
+              border: "1px solid rgba(232, 232, 230, 0.2)",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
+              borderRadius: "12px",
+              background: "#ffffff",
+              overflow: "hidden",
+            }}
+          >
+            <PlanEditor
+              ref={planEditorRef}
+              userEmail={userEmail}
+              userName={userName}
+              userAvatar={userAvatar}
+              streamingTitle={streamingTitle}
+              isAgentTyping={isAgentTyping}
+              planLines={planLines}
+              isMakingPlan={isMakingPlan}
+              isUpdating={isMakingPlan}
+              planReady={planReady}
+              agentStatus={isMakingPlan}
+              roomId={roomId}
+              role={role}
+              othersPresence={othersPresence}
+            />
+          </div>
         </div>
       </div>
+      {showSearch && (
+        <div
+          onClick={() => setShowSearch(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.25)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            paddingTop: 120,
+            zIndex: 100,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#ffffff",
+              borderRadius: 10,
+              width: 480,
+              maxHeight: 360,
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <input
+              ref={searchInputRef}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search sessions..."
+              style={{
+                padding: "12px 16px",
+                border: "none",
+                borderBottom: "0.5px solid #e8e8e6",
+                outline: "none",
+                fontSize: 14,
+                fontFamily: "inherit",
+                color: "#1a1a1a",
+                width: "100%",
+              }}
+            />
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              {searchSessions
+                .filter(
+                  (s) =>
+                    !searchQuery ||
+                    s.title
+                      ?.toLowerCase()
+                      .includes(searchQuery.toLowerCase())
+                )
+                .map((s) => (
+                  <div
+                    key={s.id}
+                    onClick={() => {
+                      window.location.href = "/doc?room=" + s.roomId;
+                      setShowSearch(false);
+                    }}
+                    style={{
+                      padding: "10px 16px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                    }}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.background = "#f5f5f3")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.background = "transparent")
+                    }
+                  >
+                    <span
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: "#1a1a1a",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        flex: 1,
+                      }}
+                    >
+                      {s.title || "Untitled"}
+                    </span>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        flexShrink: 0,
+                      }}
+                    >
+                      <img
+                        src={
+                          "https://api.dicebear.com/9.x/pixel-art/svg?seed=" +
+                          encodeURIComponent(s.ownerName ?? "Demo")
+                        }
+                        width={16}
+                        height={16}
+                        style={{
+                          borderRadius: "50%",
+                          border: "1.5px solid #f5f5f3",
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "#a0a0a0",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {s.createdAt
+                          ? new Date(s.createdAt).toLocaleDateString(
+                              "en-US",
+                              {
+                                month: "short",
+                                day: "numeric",
+                              }
+                            )
+                          : "Today"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              {searchSessions.filter(
+                (s) =>
+                  !searchQuery ||
+                  s.title
+                    ?.toLowerCase()
+                    .includes(searchQuery.toLowerCase())
+              ).length === 0 && (
+                <div
+                  style={{
+                    padding: "24px 16px",
+                    textAlign: "center",
+                    fontSize: 13,
+                    color: "#a0a0a0",
+                  }}
+                >
+                  No sessions found
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

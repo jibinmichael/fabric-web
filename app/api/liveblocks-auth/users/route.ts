@@ -8,7 +8,7 @@ export async function POST(request: Request) {
 
   const users: UserInfo[] = userIds.map((id) => ({
     name: "Demo User",
-    avatar: `https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(id)}`,
+    avatar: `https://api.dicebear.com/9.x/thumbs/svg?seed=${encodeURIComponent(id)}`,
     color: "#22c55e",
   }));
 

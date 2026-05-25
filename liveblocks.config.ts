@@ -2,6 +2,7 @@ declare global {
   interface Liveblocks {
     Presence: {
       viewingSection: string | null;
+      cursor: { x: number; y: number } | null;
     };
     Storage: {
       gapPosted: boolean;
@@ -10,21 +11,7 @@ declare global {
       planJson: string;
       planLines: string[];
       chatMessages: { role: string; content: string }[];
-      roomChat: {
-        id: string;
-        userId: string;
-        userName: string;
-        userAvatar: string;
-        text: string;
-        timestamp: number;
-        reactions?: Record<string, string[]>;
-        attachments?: {
-          id: string;
-          name: string;
-          mediaType: string;
-          previewUrl: string;
-        }[];
-      }[];
+      challengedThreadIds: string[];
     };
     UserMeta: {
       id: string;

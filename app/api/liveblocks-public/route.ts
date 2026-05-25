@@ -15,7 +15,7 @@ export async function POST() {
   const session = liveblocks.prepareSession(id, {
     userInfo: {
       name: "Viewer",
-      avatar: `https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(id)}`,
+      avatar: `https://api.dicebear.com/9.x/thumbs/svg?seed=${encodeURIComponent(id)}`,
       color: "#999999",
     },
   });

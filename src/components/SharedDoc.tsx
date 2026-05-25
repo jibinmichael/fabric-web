@@ -21,7 +21,7 @@ export function SharedDoc({ roomId }: { roomId: string }) {
     <LiveblocksProvider authEndpoint="/api/liveblocks-public">
       <RoomProvider
         id={roomId}
-        initialPresence={{ viewingSection: null }}
+        initialPresence={{ viewingSection: null, cursor: null }}
         initialStorage={{
           ownerId: "",
           docTitle: "",
@@ -29,7 +29,7 @@ export function SharedDoc({ roomId }: { roomId: string }) {
           planJson: "",
           planLines: [],
           chatMessages: [],
-          roomChat: [],
+          challengedThreadIds: [],
         }}
       >
         <ClientSideSuspense fallback={<Fallback />}>

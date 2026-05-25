@@ -11,6 +11,16 @@ const SCHEMA = fs.readFileSync(
   "utf-8"
 );
 
+const BROADCASTS_SAMPLE = fs.readFileSync(
+  path.join(process.cwd(), "src/api-samples/broadcasts.json"),
+  "utf-8"
+);
+
+const SALES_PIPELINE_SAMPLE = fs.readFileSync(
+  path.join(process.cwd(), "src/api-samples/sales-pipeline.json"),
+  "utf-8"
+);
+
 const SYSTEM_INSTRUCTIONS = `You are a sharp product intelligence agent grounded in the Wati WhatsApp Business API.
 
 You have just reviewed a product plan and the conversation that built it.
@@ -23,12 +33,34 @@ Return ONLY a JSON object:
 {
   "gap": string (the gap as a sharp question under 25 words),
   "section": string (exactly one of: Problem | Who is affected | What good looks like | Open questions | API gaps | Next),
-  "nextAction": string (a specific actionable next step to resolve the gap, under 15 words, plain text, no markdown)
+  "nextAction": string (a specific actionable next step to resolve the gap, under 15 words, plain text, no markdown),
+  "engineeringChecklist": string[],
+  "qaChecklist": string[],
+  "designChecklist": string[],
+  "dataMetrics": { "metric": string, "target": string, "owner": string, "frequency": string }[]
 }
+
+Additionally, if and only if you have enough specific context from the plan to generate non-generic items, return these four arrays. If context is insufficient for any array — return empty array []. Never make up generic items.
+
+engineeringChecklist: specific technical tasks grounded in the actual API gaps and plan. Under 4 items max.
+
+qaChecklist: specific test scenarios for this exact plan. Under 4 items max.
+
+designChecklist: specific design constraints for this exact UI context. Under 3 items max.
+
+dataMetrics: specific measurable metrics with realistic targets. Under 4 rows max. owner is one of: PM, Engineering, Design, Data. frequency is one of: Daily, Weekly, Monthly, Per deploy.
 
 Return nothing else. No markdown. Just JSON.`;
 
-const SYSTEM_REFERENCE = `Reference for Wati API capabilities:\n\n${SCHEMA}`;
+const SYSTEM_REFERENCE = `Reference for Wati API capabilities:
+
+${SCHEMA}
+
+Broadcasts API:
+${BROADCASTS_SAMPLE}
+
+Sales Pipeline API:
+${SALES_PIPELINE_SAMPLE}`;
 
 type ChatTurn = { role?: string; content?: string };
 
@@ -104,7 +136,7 @@ export async function POST(request: Request) {
       model: MODEL,
       max_tokens: 8400,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      thinking: { type: "adaptive", budget_tokens: 8000 } as any,
+      thinking: { type: "adaptive" },
       system: [
         { type: "text", text: SYSTEM_INSTRUCTIONS },
         {
@@ -134,13 +166,17 @@ export async function POST(request: Request) {
     return Response.json({ gap: null });
   }
 
-  let parsed: { gap?: unknown; section?: unknown; nextAction?: unknown };
+  let parsed: {
+    gap?: unknown;
+    section?: unknown;
+    nextAction?: unknown;
+    engineeringChecklist?: unknown;
+    qaChecklist?: unknown;
+    designChecklist?: unknown;
+    dataMetrics?: unknown;
+  };
   try {
-    parsed = JSON.parse(jsonText) as {
-      gap?: unknown;
-      section?: unknown;
-      nextAction?: unknown;
-    };
+    parsed = JSON.parse(jsonText) as typeof parsed;
   } catch {
     return Response.json({ gap: null });
   }
@@ -152,12 +188,89 @@ export async function POST(request: Request) {
   const nextAction =
     typeof parsed.nextAction === "string" ? parsed.nextAction.trim() : "";
 
+  const cleanStringArray = (value: unknown, max: number): string[] => {
+    if (!Array.isArray(value)) return [];
+    return value
+      .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+      .map((s) => s.trim())
+      .slice(0, max);
+  };
+
+  const VALID_OWNERS = new Set(["PM", "Engineering", "Design", "Data"]);
+  const VALID_FREQUENCIES = new Set([
+    "Daily",
+    "Weekly",
+    "Monthly",
+    "Per deploy",
+  ]);
+
+  const cleanDataMetrics = (
+    value: unknown
+  ): {
+    metric: string;
+    target: string;
+    owner: string;
+    frequency: string;
+  }[] => {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((row) => {
+        if (!row || typeof row !== "object") return null;
+        const r = row as Record<string, unknown>;
+        const metric =
+          typeof r.metric === "string" ? r.metric.trim() : "";
+        const target =
+          typeof r.target === "string" ? r.target.trim() : "";
+        const owner =
+          typeof r.owner === "string" ? r.owner.trim() : "";
+        const frequency =
+          typeof r.frequency === "string" ? r.frequency.trim() : "";
+        if (!metric || !target) return null;
+        if (!VALID_OWNERS.has(owner)) return null;
+        if (!VALID_FREQUENCIES.has(frequency)) return null;
+        return { metric, target, owner, frequency };
+      })
+      .filter(
+        (
+          row
+        ): row is {
+          metric: string;
+          target: string;
+          owner: string;
+          frequency: string;
+        } => row !== null
+      )
+      .slice(0, 4);
+  };
+
+  const engineeringChecklist = cleanStringArray(
+    parsed.engineeringChecklist,
+    4
+  );
+  const qaChecklist = cleanStringArray(parsed.qaChecklist, 4);
+  const designChecklist = cleanStringArray(parsed.designChecklist, 3);
+  const dataMetrics = cleanDataMetrics(parsed.dataMetrics);
+
   if (!gap) {
-    return Response.json({ gap: null });
+    return Response.json({
+      gap: null,
+      engineeringChecklist,
+      qaChecklist,
+      designChecklist,
+      dataMetrics,
+    });
   }
 
   // Server-side createThread was removed — the client now posts the anchored
   // comment via the Tiptap Liveblocks extension so the thread is bound to the
   // section heading instead of floating unanchored.
-  return Response.json({ gap, section, nextAction });
+  return Response.json({
+    gap,
+    section,
+    nextAction,
+    engineeringChecklist,
+    qaChecklist,
+    designChecklist,
+    dataMetrics,
+  });
 }

@@ -29,6 +29,7 @@ import {
   useStorage,
   useThreads,
 } from "@liveblocks/react/suspense";
+import { AvatarStack } from "@liveblocks/react-ui";
 import "@liveblocks/react-ui/styles.css";
 import "@liveblocks/react-tiptap/styles.css";
 import "./composer-overrides.css";
@@ -49,6 +50,7 @@ export type PlanSectionKey =
   | "whoIsAffected"
   | "whatGoodLooksLike"
   | "openQuestions"
+  | "apiGaps"
   | "nextActions";
 
 export type PlanEditorHandle = {
@@ -117,11 +119,9 @@ function escapeHtml(s: string): string {
 function buildPlanHtml(plan: PlanData): string {
   const parts: string[] = [];
 
-  parts.push(`<hr>`);
   parts.push(`<h2>Problem</h2>`);
   parts.push(`<p>${escapeHtml(plan.problem ?? "")}</p>`);
 
-  parts.push(`<hr>`);
   parts.push(`<h2>Who is affected</h2>`);
   parts.push(`<ul>`);
   for (const item of plan.whoIsAffected ?? []) {
@@ -129,11 +129,9 @@ function buildPlanHtml(plan: PlanData): string {
   }
   parts.push(`</ul>`);
 
-  parts.push(`<hr>`);
   parts.push(`<h2>What good looks like</h2>`);
   parts.push(`<p>${escapeHtml(plan.whatGoodLooksLike ?? "")}</p>`);
 
-  parts.push(`<hr>`);
   parts.push(`<h2>Open questions</h2>`);
   parts.push(`<ul data-type="taskList">`);
   for (const q of plan.openQuestions ?? []) {
@@ -149,7 +147,6 @@ function buildPlanHtml(plan: PlanData): string {
   parts.push(`</ul>`);
 
   if (plan.apiGaps && plan.apiGaps.length > 0) {
-    parts.push(`<hr>`);
     parts.push(`<h2>API gaps</h2>`);
     for (const gap of plan.apiGaps) {
       const cleanGap = gap
@@ -162,7 +159,6 @@ function buildPlanHtml(plan: PlanData): string {
     }
   }
 
-  parts.push(`<hr>`);
   parts.push(`<h2>Next</h2>`);
   parts.push(`<ul data-type="taskList">`);
   for (const action of plan.nextActions ?? []) {
@@ -190,6 +186,7 @@ const SECTION_TITLES: Record<PlanSectionKey, string> = {
   whoIsAffected: "Who is affected",
   whatGoodLooksLike: "What good looks like",
   openQuestions: "Open questions",
+  apiGaps: "API gaps",
   nextActions: "Next",
 };
 
@@ -297,6 +294,15 @@ const TiptapEditor = forwardRef<PlanEditorHandle, TiptapEditorProps>(
     const self = useSelf();
     const processedCommentIdsRef = useRef<Set<string>>(new Set());
     const seededAgentRepliesRef = useRef(false);
+    const challengedThreadIds =
+      useStorage((root) => root.challengedThreadIds) ?? [];
+    const markThreadChallenged = useMutation(
+      ({ storage }, threadId: string) => {
+        const current = storage.get("challengedThreadIds") ?? [];
+        storage.set("challengedThreadIds", [...current, threadId]);
+      },
+      []
+    );
 
     useEffect(() => {
       if (!threads) return;
@@ -316,13 +322,50 @@ const TiptapEditor = forwardRef<PlanEditorHandle, TiptapEditorProps>(
         for (const c of t.comments) {
           if (processedCommentIdsRef.current.has(c.id)) continue;
           processedCommentIdsRef.current.add(c.id);
-          if (c.userId === "agent-1") continue;
-          if (!selfId || c.userId !== selfId) continue;
 
+          // Challenger fires on new agent-1 replies.
+          if (c.userId === "agent-1") {
+            const agentReply = extractCommentText(c.body);
+            if (!agentReply || agentReply.trim().length < 10) continue;
+
+            if (challengedThreadIds.includes(t.id)) continue;
+            markThreadChallenged(t.id);
+
+            const latestPlanText = editorRef.current?.getText() ?? "";
+            void fetch("/api/agent-challenge", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                threadId: t.id,
+                agentReply,
+                planText: latestPlanText,
+                roomId: room.id,
+              }),
+            }).catch(() => {});
+            continue;
+          }
+
+          // Agent reply: fires on any user comment that mentions @fabric or
+          // is a question. Webhook also covers this server-side; both paths
+          // hit the same /api/agent-reply route which dedupes via the
+          // classifier + thread state.
           const commentText = extractCommentText(c.body);
           if (!commentText) continue;
-          const planText = editorRef.current?.getText() ?? "";
 
+          const hasFabricMention = commentText
+            .toLowerCase()
+            .includes("@fabric");
+          const isQuestion =
+            commentText.includes("?") ||
+            /^(how|why|what|can|does|will|is|should)\b/i.test(
+              commentText.trim()
+            );
+
+          if (!hasFabricMention && !isQuestion) continue;
+
+          if (c.userId === "agent-1") continue;
+
+          const planText = editorRef.current?.getText() ?? "";
           void fetch("/api/agent-reply", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -332,17 +375,7 @@ const TiptapEditor = forwardRef<PlanEditorHandle, TiptapEditorProps>(
               planText,
               roomId: room.id,
             }),
-          })
-            .then(async (res) => {
-              if (!res.ok) return;
-              const data = (await res.json().catch(() => ({}))) as {
-                reply?: unknown;
-              };
-              const reply =
-                typeof data.reply === "string" ? data.reply : "";
-              if (!reply || reply.trim().length < 10) return;
-            })
-            .catch(() => {});
+          }).catch(() => {});
         }
       }
     }, [threads, room.id, self?.id]);
@@ -387,7 +420,108 @@ const TiptapEditor = forwardRef<PlanEditorHandle, TiptapEditorProps>(
                   gap?: string | null;
                   section?: string | null;
                   nextAction?: string | null;
+                  engineeringChecklist?: string[];
+                  qaChecklist?: string[];
+                  designChecklist?: string[];
+                  dataMetrics?: {
+                    metric?: string;
+                    target?: string;
+                    owner?: string;
+                    frequency?: string;
+                  }[];
                 } | null;
+
+                // Append any confidently-generated extra sections to the end
+                // of the doc. Each section only appears if its array is non-empty.
+                const engineeringChecklist = Array.isArray(
+                  data?.engineeringChecklist
+                )
+                  ? data.engineeringChecklist
+                  : [];
+                const qaChecklist = Array.isArray(data?.qaChecklist)
+                  ? data.qaChecklist
+                  : [];
+                const designChecklist = Array.isArray(data?.designChecklist)
+                  ? data.designChecklist
+                  : [];
+                const dataMetrics = Array.isArray(data?.dataMetrics)
+                  ? data.dataMetrics
+                  : [];
+
+                const buildChecklistNodes = (
+                  heading: string,
+                  items: string[]
+                ) => [
+                  {
+                    type: "heading",
+                    attrs: { level: 2 },
+                    content: [{ type: "text", text: heading }],
+                  },
+                  {
+                    type: "taskList",
+                    content: items.map((item) => ({
+                      type: "taskItem",
+                      attrs: { checked: false },
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [{ type: "text", text: item }],
+                        },
+                      ],
+                    })),
+                  },
+                ];
+
+                const extraNodes: Record<string, unknown>[] = [];
+                if (engineeringChecklist.length > 0) {
+                  extraNodes.push(
+                    ...buildChecklistNodes(
+                      "Engineering checklist",
+                      engineeringChecklist
+                    )
+                  );
+                }
+                if (qaChecklist.length > 0) {
+                  extraNodes.push(
+                    ...buildChecklistNodes("QA checklist", qaChecklist)
+                  );
+                }
+                if (designChecklist.length > 0) {
+                  extraNodes.push(
+                    ...buildChecklistNodes(
+                      "Design checklist",
+                      designChecklist
+                    )
+                  );
+                }
+                if (dataMetrics.length > 0) {
+                  extraNodes.push({
+                    type: "heading",
+                    attrs: { level: 2 },
+                    content: [{ type: "text", text: "Data & metrics" }],
+                  });
+                  for (const m of dataMetrics) {
+                    extraNodes.push({
+                      type: "paragraph",
+                      content: [
+                        {
+                          type: "text",
+                          text: `${m.metric ?? ""} — ${m.target ?? ""} · ${
+                            m.owner ?? ""
+                          } · ${m.frequency ?? ""}`,
+                        },
+                      ],
+                    });
+                  }
+                }
+
+                if (extraNodes.length > 0 && editorRef.current) {
+                  const endPos = editorRef.current.state.doc.content.size;
+                  editorRef.current
+                    .chain()
+                    .insertContentAt(endPos, extraNodes)
+                    .run();
+                }
 
                 if (!data?.gap || !data.gap.trim()) return;
                 const gap = data.gap.trim();
@@ -510,39 +644,34 @@ const TiptapEditor = forwardRef<PlanEditorHandle, TiptapEditorProps>(
           const title = SECTION_TITLES[section];
           if (!title) return false;
 
-          const headings: { pos: number; size: number; text: string }[] = [];
-          let docEndPos = 0;
+          let headingEndPos: number | null = null;
+          let nextHeadingPos: number | null = null;
           editor.state.doc.descendants((node, pos) => {
-            docEndPos = Math.max(docEndPos, pos + node.nodeSize);
-            if (node.type.name === "heading" && node.attrs.level === 2) {
-              headings.push({
-                pos,
-                size: node.nodeSize,
-                text: node.textContent.trim(),
-              });
+            if (node.type.name !== "heading" || node.attrs.level !== 2) {
+              return true;
+            }
+            if (headingEndPos === null) {
+              if (node.textContent.trim() === title) {
+                headingEndPos = pos + node.nodeSize;
+              }
+            } else if (nextHeadingPos === null) {
+              nextHeadingPos = pos;
             }
             return true;
           });
 
-          const targetIdx = headings.findIndex((h) => h.text === title);
-          if (targetIdx < 0) return false;
-
-          const target = headings[targetIdx];
-          const next = headings[targetIdx + 1];
-          const insertPos = next
-            ? next.pos
-            : editor.state.doc.content.size;
-          const safePos = Math.min(insertPos, editor.state.doc.content.size);
+          if (headingEndPos === null) return false;
+          const to =
+            nextHeadingPos ?? editor.state.doc.content.size;
 
           editor
             .chain()
-            .focus()
-            .insertContentAt(safePos, {
+            .deleteRange({ from: headingEndPos, to })
+            .insertContentAt(headingEndPos, {
               type: "paragraph",
               content: [{ type: "text", text: newContent }],
             })
             .run();
-          void target;
           return true;
         },
       }),
@@ -595,7 +724,7 @@ const TiptapEditor = forwardRef<PlanEditorHandle, TiptapEditorProps>(
               {shown.map((v, i) => (
                 <img
                   key={v.name + String(i)}
-                  src={`https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(v.name)}`}
+                  src={`https://api.dicebear.com/9.x/thumbs/svg?seed=${encodeURIComponent(v.name)}`}
                   alt=""
                   title={v.name}
                   referrerPolicy="no-referrer"
@@ -645,7 +774,7 @@ const TiptapEditor = forwardRef<PlanEditorHandle, TiptapEditorProps>(
                 {uniqueCommenterIds.slice(0, 3).map((uid, i) => (
                   <img
                     key={uid}
-                    src={`https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(uid)}`}
+                    src={`https://api.dicebear.com/9.x/thumbs/svg?seed=${encodeURIComponent(uid)}`}
                     alt=""
                     referrerPolicy="no-referrer"
                     style={{
@@ -665,7 +794,6 @@ const TiptapEditor = forwardRef<PlanEditorHandle, TiptapEditorProps>(
                 {totalCommentCount === 1 ? "comment" : "comments"}
               </span>
             </div>
-            <hr className={styles.sectionDivider} />
           </>
         ) : null}
 
@@ -731,6 +859,7 @@ export const PlanEditor = forwardRef<PlanEditorHandle, PlanEditorProps>(
     const others = useOthers();
     const roleBadge = role ? ROLE_BADGES[role] : undefined;
     const [copied, setCopied] = useState(false);
+    void copied;
 
     const handleShare = useCallback(async () => {
       if (!roomId || typeof window === "undefined") return;
@@ -775,6 +904,9 @@ export const PlanEditor = forwardRef<PlanEditorHandle, PlanEditorProps>(
     const hasTitle = streamingTitle.length > 0;
     const hasLines = planLines.length > 0 && !planReady && !isMakingPlan;
     const cursorOnTitle = isAgentTyping && !hasLines && !isMakingPlan;
+    const agentWritingBullet = othersPresence.some(
+      (p) => p.section === "writing-bullet"
+    );
 
     return (
       <>
@@ -805,7 +937,7 @@ export const PlanEditor = forwardRef<PlanEditorHandle, PlanEditorProps>(
                 alignItems: "center",
                 gap: 6,
                 fontSize: 11,
-                color: agentStatus ? "#22c55e" : "#a0a0a0",
+                color: agentStatus ? "#6b7280" : "#a0a0a0",
                 lineHeight: 1,
               }}
             >
@@ -815,7 +947,7 @@ export const PlanEditor = forwardRef<PlanEditorHandle, PlanEditorProps>(
                   width: 6,
                   height: 6,
                   borderRadius: "50%",
-                  background: agentStatus ? "#22c55e" : "#c0bfbc",
+                  background: agentStatus ? "#6b7280" : "#c0bfbc",
                   display: "inline-block",
                 }}
               />
@@ -845,117 +977,58 @@ export const PlanEditor = forwardRef<PlanEditorHandle, PlanEditorProps>(
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 10,
+                gap: 8,
               }}
             >
-              <div style={{ display: "flex", alignItems: "center" }}>
-                {others.slice(0, 3).map((o, i) => {
-                  const name =
-                    typeof o.info?.name === "string" && o.info.name
-                      ? o.info.name
-                      : "Anonymous";
-                  const src =
-                    (typeof o.info?.avatar === "string" && o.info.avatar) ||
-                    `https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(
-                      name
-                    )}`;
-                  return (
-                    <img
-                      key={o.connectionId}
-                      src={src}
-                      alt=""
-                      title={name}
-                      referrerPolicy="no-referrer"
-                      style={{
-                        width: 24,
-                        height: 24,
-                        borderRadius: "50%",
-                        border: "2px solid #ffffff",
-                        objectFit: "cover",
-                        display: "inline-block",
-                        marginLeft: i === 0 ? 0 : -8,
-                        zIndex: i + 1,
-                        position: "relative",
-                      }}
-                    />
-                  );
-                })}
-                {others.length > 3 ? (
-                  <span
-                    title={others
-                      .slice(3)
-                      .map((o) =>
-                        typeof o.info?.name === "string" && o.info.name
-                          ? o.info.name
-                          : "Anonymous"
-                      )
-                      .join(", ")}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      width: 24,
-                      height: 24,
-                      borderRadius: "50%",
-                      background: "#f5f5f5",
-                      border: "2px solid #ffffff",
-                      marginLeft: -8,
-                      zIndex: 4,
-                      position: "relative",
-                      fontSize: 10,
-                      fontWeight: 500,
-                      color: "#6b6b6b",
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    +{others.length - 3}
-                  </span>
-                ) : null}
-
-                <img
-                  src={
-                    userAvatar ||
-                    `https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(
-                      userName
-                    )}`
-                  }
-                  alt=""
-                  referrerPolicy="no-referrer"
-                  title={userName || "You"}
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: "50%",
-                    border: "2px solid #ffffff",
-                    objectFit: "cover",
-                    display: "inline-block",
-                    marginLeft: others.length > 0 ? -8 : 0,
-                    zIndex: others.length + 1,
-                    position: "relative",
-                  }}
-                />
-              </div>
-
               <button
                 type="button"
                 onClick={handleShare}
                 style={{
+                  border: "none",
+                  background: "transparent",
+                  padding: 0,
+                  cursor: "pointer",
+                  color: "#808080",
                   fontSize: 12,
                   fontWeight: 500,
-                  padding: "5px 14px",
-                  borderRadius: 6,
-                  border: "none",
-                  background: "#2563eb",
-                  color: "#ffffff",
-                  cursor: "pointer",
                   fontFamily: "inherit",
                   lineHeight: 1,
                 }}
               >
-                {copied ? "Copied!" : "Share"}
+                Invite
               </button>
+
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <AvatarStack max={4} />
+              </div>
             </div>
           </div>
+
+          {isUpdating ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                marginBottom: 8,
+              }}
+            >
+              <img
+                src="https://api.dicebear.com/9.x/pixel-art/svg?seed=Agent1"
+                alt=""
+                referrerPolicy="no-referrer"
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: "50%",
+                  display: "block",
+                }}
+              />
+              <span style={{ fontSize: 11, color: "#a0a0a0" }}>
+                Agent 1 is writing...
+              </span>
+            </div>
+          ) : null}
 
           {hasTitle ? (
             <div className={styles.titleRow}>
@@ -970,11 +1043,29 @@ export const PlanEditor = forwardRef<PlanEditorHandle, PlanEditorProps>(
 
           {hasLines ? (
             <div className={styles.planLines}>
-              {planLines.map((line, index) => (
-                <div key={index} className={styles.planLineRow}>
-                  <p className={styles.planLine}>{line}</p>
-                </div>
-              ))}
+              {planLines.map((line, index) => {
+                const isLast = index === planLines.length - 1;
+                return (
+                  <div key={index} className={styles.planLineRow}>
+                    <p className={styles.planLine}>{line}</p>
+                    {isLast && agentWritingBullet ? (
+                      <img
+                        src="https://api.dicebear.com/9.x/pixel-art/svg?seed=Agent1"
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        style={{
+                          width: 16,
+                          height: 16,
+                          borderRadius: "50%",
+                          marginLeft: "auto",
+                          alignSelf: "center",
+                          display: "block",
+                        }}
+                      />
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           ) : null}
 
@@ -982,7 +1073,7 @@ export const PlanEditor = forwardRef<PlanEditorHandle, PlanEditorProps>(
             <div
               style={{
                 fontSize: 13,
-                color: "#22c55e",
+                color: "#6b7280",
                 marginBottom: 16,
                 opacity: isMakingPlan ? 1 : 0,
                 transition: "opacity 300ms ease",

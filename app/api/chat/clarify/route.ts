@@ -216,7 +216,7 @@ export async function POST(request: Request) {
             model: MODEL,
             max_tokens: 4000,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            thinking: { type: "adaptive", budget_tokens: 5000 } as any,
+            thinking: { type: "adaptive" },
             system: planContext
               ? [
                   {

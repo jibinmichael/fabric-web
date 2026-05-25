@@ -10,19 +10,33 @@ const SCHEMA = fs.readFileSync(
   "utf-8"
 );
 
+const BROADCASTS_SAMPLE = fs.readFileSync(
+  path.join(process.cwd(), "src/api-samples/broadcasts.json"),
+  "utf-8"
+);
+
+const SALES_PIPELINE_SAMPLE = fs.readFileSync(
+  path.join(process.cwd(), "src/api-samples/sales-pipeline.json"),
+  "utf-8"
+);
+
 const SYSTEM_INSTRUCTIONS = `You are a product intelligence agent grounded in the Wati WhatsApp Business API.
 Someone highlighted specific text in a product plan and posted a comment about it.
-
-Answer ONLY about the highlighted text and the comment. Be specific and direct.
-Reference the exact highlighted text in your answer.
+Answer specifically about the highlighted text and the comment.
+Reference the exact highlighted text.
 Keep answer to 2-3 sentences maximum.
-Plain text only — no markdown, no bullets, no bold, no formatting.
-Never use markdown. Think carefully about what is actually being asked before forming a response. Be specific to the highlighted text, not generic.
-If you cannot answer confidently, say nothing — return empty string.`;
+Plain text only. No markdown. No bullets.
+No bold. No formatting.`;
 
 const SYSTEM_REFERENCE = `Reference for Wati API capabilities:
 
-${SCHEMA}`;
+${SCHEMA}
+
+Broadcasts API:
+${BROADCASTS_SAMPLE}
+
+Sales Pipeline API:
+${SALES_PIPELINE_SAMPLE}`;
 
 function stripMarkdown(text: string): string {
   return text
@@ -84,10 +98,33 @@ export async function POST(request: Request) {
   const anthropic = new Anthropic({
     apiKey,
     defaultHeaders: {
-      "anthropic-beta":
-        "prompt-caching-2024-07-31,interleaved-thinking-2025-05-14",
+      "anthropic-beta": "prompt-caching-2024-07-31",
     },
   });
+
+  // ── Confidence check ───────────────────────────────────────────────────────
+  // Quick classifier — only proceed with the full reply call when the
+  // comment is genuinely answerable from a plan / API schema.
+  try {
+    const classifier = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 10,
+      system:
+        "Reply YES if this comment is asking a genuine question or requesting information that can be answered from a product plan or API schema. Reply NO if it is a statement, opinion, or acknowledgement.",
+      messages: [{ role: "user", content: commentText }],
+    });
+    const verdict = classifier.content
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("")
+      .trim()
+      .toUpperCase();
+    if (!verdict.startsWith("YES")) {
+      return Response.json({ reply: "" });
+    }
+  } catch {
+    // If the classifier itself fails, fall through to the main call rather
+    // than silently dropping the comment.
+  }
 
   let reply = "";
   try {
@@ -95,7 +132,7 @@ export async function POST(request: Request) {
       model: MODEL,
       max_tokens: 3400,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      thinking: { type: "adaptive", budget_tokens: 3000 } as any,
+      thinking: { type: "adaptive" },
       system: [
         { type: "text", text: SYSTEM_INSTRUCTIONS },
         {

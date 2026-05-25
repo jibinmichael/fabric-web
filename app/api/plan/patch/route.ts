@@ -2,17 +2,34 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const MODEL = "claude-sonnet-4-6";
 
-const SYSTEM_PROMPT = `You analyze a product planning conversation and decide if the plan needs updating based on new information revealed.
+const SYSTEM_PROMPT = `You are reviewing a product plan and a new piece of information emerged from conversation.
 
-Return ONLY valid JSON in this format:
+STRICT RULES:
+- Only return shouldUpdate: true if you are 100% certain this new information meaningfully changes the plan. Not 90%. Not probably. Certain.
+- If there is ANY doubt — return shouldUpdate: false
+- Better to miss an update than make a wrong one
+- Do not update based on rephrasing or clarification
+- Only update when genuinely NEW information is revealed that changes facts, scope, or feasibility
+
+When shouldUpdate is true return:
 {
-  "shouldUpdate": true/false,
-  "section": "problem|whoIsAffected|whatGoodLooksLike|openQuestions|nextActions",
-  "newContent": "the updated content for that section"
+  "shouldUpdate": true,
+  "updates": [
+    {
+      "section": "problem" | "whoIsAffected" | "whatGoodLooksLike" | "openQuestions" | "apiGaps" | "nextActions",
+      "newContent": "..."
+    }
+  ]
 }
 
-Only return shouldUpdate: true if genuinely new information was revealed that changes the plan. Not just rephrasing. Real new facts.
-If no update needed return { shouldUpdate: false }`;
+Return ALL affected sections in the updates array.
+Not just one. All that are definitely affected.
+If unsure about a section — exclude it.
+
+When shouldUpdate is false return:
+{ "shouldUpdate": false }
+
+Return only valid JSON. No markdown.`;
 
 function stripCodeFence(text: string): string {
   return text
@@ -44,17 +61,23 @@ export async function POST(request: Request) {
   const client = new Anthropic({ apiKey });
 
   try {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 500,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: `Current plan:\n${currentPlan}\n\nConversation:\n${conversationText}`,
-        },
-      ],
-    });
+    const response = await client.messages.create(
+      {
+        model: MODEL,
+        max_tokens: 16000,
+        thinking: { type: "adaptive" },
+        system: SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user",
+            content: `Current plan:\n${currentPlan}\n\nConversation:\n${conversationText}`,
+          },
+        ],
+      },
+      {
+        headers: { "anthropic-beta": "interleaved-thinking-2025-05-14" },
+      }
+    );
 
     const raw = response.content
       .map((b) => (b.type === "text" ? b.text : ""))
